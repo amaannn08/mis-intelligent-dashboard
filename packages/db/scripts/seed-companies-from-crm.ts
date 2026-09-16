@@ -14,7 +14,7 @@ interface CrmCompanyRow {
   status: string | null;
 }
 
-async function seedCompaniesFromCrm() {
+export async function seedCompaniesFromCrm(closePool = false) {
   const crmEnvPath = process.env.CRM_ENV_PATH || '/home/amann/intern-weh/mvp/crm/backend/.env';
 
   let crmConnectionString = process.env.CRM_DATABASE_URL;
@@ -105,10 +105,14 @@ async function seedCompaniesFromCrm() {
     }))
   );
 
-  await pool.end();
+  if (closePool) {
+    await pool.end();
+  }
 }
 
-seedCompaniesFromCrm().catch((err) => {
-  console.error('Failed to seed companies from CRM:', err.message);
-  process.exit(1);
-});
+if (process.argv[1]?.endsWith('seed-companies-from-crm.ts')) {
+  seedCompaniesFromCrm(true).catch((err) => {
+    console.error('Failed to seed companies from CRM:', err.message);
+    process.exit(1);
+  });
+}

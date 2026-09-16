@@ -40,7 +40,7 @@ const METRIC_DEFINITIONS: NewMetricDefinition[] = [
   },
 ];
 
-async function seed() {
+export async function seedMetricDefinitions(closePool = false) {
   console.log('Seeding metric_definitions...');
 
   for (const def of METRIC_DEFINITIONS) {
@@ -70,10 +70,14 @@ async function seed() {
     }))
   );
 
-  await pool.end();
+  if (closePool) {
+    await pool.end();
+  }
 }
 
-seed().catch((err) => {
-  console.error('Failed to seed metric_definitions:', err);
-  process.exit(1);
-});
+if (process.argv[1]?.endsWith('seed-metric-definitions.ts')) {
+  seedMetricDefinitions(true).catch((err) => {
+    console.error('Failed to seed metric_definitions:', err);
+    process.exit(1);
+  });
+}
