@@ -12,7 +12,9 @@
 In Run 3, the complete HTTP API surface for the Portfolio MIS Intelligence Dashboard was built strictly on top of `@mis/db` and `@mis/core`. Zero pipeline, metric parsing, or RAG retrieval logic was duplicated inside Next.js route handlers.
 
 ### Key Highlights
-- **11 Route Handlers** implemented under `apps/web/src/app/api/...` covering health, authentication, company directory, company metrics series, document lifecycle (upload, polling, binary streaming, deletion), and streaming grounded RAG queries.
+- **11 Route Handlers** implementedChecking final validation task status...
+Waiting for final validation to complete...
+ company metrics series, document lifecycle (upload, polling, binary streaming, deletion), and streaming grounded RAG queries.
 - **Zod Validation & Typed JSON Error Envelopes**: All inputs are validated via Zod schemas, mapping errors to `{ error: { code: string, message: string, details?: unknown } }` with proper HTTP status codes (`400`, `401`, `404`, `409`, `500`, `503`).
 - **Timing-Safe MVP Authentication**: Constant-time credential verification (`crypto.timingSafeEqual` with pre-hashed SHA-256) comparing `AUTH_USERNAME` and `AUTH_PASSWORD`.
 - **Signed Session Cookie**: Issues HMAC-SHA256 cryptographically signed `mis_session` cookie via Web Crypto API.
