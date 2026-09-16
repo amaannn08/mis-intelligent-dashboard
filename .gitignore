@@ -77,3 +77,15 @@ uploads/
 /storage/
 /scratch/
 /tmp/
+.env*
+RUN*_LOG.md
+*_STDOUT.log
+RUN*_BRIEF.md
+DRIVER_LOG.md
+CHAIN_LOG.md
+RESUME_LOG.md
+DEPLOY*_LOG.md
+FINAL_BUILD.log
+PLAN_BRIEF.md
+PLAN_AGY_RUN.md
+tsconfig.tsbuildinfo
