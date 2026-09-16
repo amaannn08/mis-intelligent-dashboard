@@ -56,6 +56,7 @@ export function extractMetricsDeterministic(
 
     for (let i = 0; i < Math.min(tableLines.length, 15); i++) {
       const { cells } = tableLines[i]!;
+      if (cells.length < 2) continue;
       const candidates: PeriodColumn[] = [];
 
       for (let c = 0; c < cells.length; c++) {

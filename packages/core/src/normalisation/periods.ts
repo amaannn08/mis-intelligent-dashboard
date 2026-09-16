@@ -55,6 +55,7 @@ export function parseReportingPeriod(
 ): string | null {
   if (!periodStr) return null;
   const s = periodStr.trim();
+  if (s.length > 25) return null; // Period headers are never long banner strings
 
   // 1. Direct YYYY-MM match (e.g. 2025-06)
   const yyyyMmMatch = s.match(/^(20[2-3][0-9])[-/.](0[1-9]|1[0-2])$/);

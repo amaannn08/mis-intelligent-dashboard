@@ -36,12 +36,16 @@ function verifyNumberInSource(reportedValue: string, sourceText: string): boolea
   }
 
   // Extract core numeric sequence (digits and decimal)
-  const digitsMatch = reportedValue.replace(/,/g, '').match(/-?\d+(?:\.\d+)?/);
+  const digitsMatch = reportedValue.replace(/,/g, '').match(/\d+(?:\.\d+)?/);
   if (!digitsMatch) return false;
 
   const coreNumber = digitsMatch[0]!;
-  // Check if core number appears in source text
-  return sourceText.includes(coreNumber);
+  // Check if core number appears in source text (as positive, negative, or parenthesised)
+  return (
+    sourceText.includes(coreNumber) ||
+    sourceText.includes(`(${coreNumber})`) ||
+    sourceText.includes(`-${coreNumber}`)
+  );
 }
 
 /**
