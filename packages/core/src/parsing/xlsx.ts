@@ -36,7 +36,8 @@ export function parseXlsx(
   options: XlsxParseOptions = {}
 ): ParsedBlock[] {
   const maxRowsPerBlock = options.maxRowsPerBlock ?? 35;
-  const workbook = XLSX.read(bytes, {
+  const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+  const workbook = XLSX.read(buf, {
     type: 'buffer',
     raw: true,
     cellDates: false,

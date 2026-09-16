@@ -1,7 +1,20 @@
-import 'dotenv/config';
+import fs from 'fs';
+import path from 'path';
+import dotenv from 'dotenv';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import * as schema from './schema/index.js';
+
+if (!process.env.DATABASE_URL) {
+  for (const envFile of ['apps/web/.env.local', 'packages/db/.env', '.env']) {
+    const resolved = path.resolve(process.cwd(), envFile);
+    if (fs.existsSync(resolved)) {
+      dotenv.config({ path: resolved });
+      if (process.env.DATABASE_URL) break;
+    }
+  }
+}
+dotenv.config();
 
 const { Pool } = pg;
 

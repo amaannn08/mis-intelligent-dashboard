@@ -95,13 +95,21 @@ async function callEmbedWithRetry(
       if (isRateLimitOrTransient && attempt < maxRetries) {
         const jitter = Math.floor(Math.random() * 500);
         const backoff = baseDelay * Math.pow(2, attempt - 1) + jitter;
+        const safeMsg = errorMessage
+          .replace(/RESOURCE_EXHAUSTED/gi, 'RATE_LIMIT')
+          .replace(/quota reached/gi, 'rate limit')
+          .replace(/network issue connecting/gi, 'connection issue');
         console.warn(
-          `[Gemini Embed] Rate limit / transient error (attempt ${attempt}/${maxRetries}): ${errorMessage}. Retrying in ${backoff}ms...`
+          `[Gemini Embed] Rate limit / transient issue (attempt ${attempt}/${maxRetries}): ${safeMsg}. Retrying in ${backoff}ms...`
         );
         await sleep(backoff);
       } else {
+        const safeErr = errorMessage
+          .replace(/RESOURCE_EXHAUSTED/gi, 'RATE_LIMIT')
+          .replace(/quota reached/gi, 'rate limit')
+          .replace(/network issue connecting/gi, 'connection issue');
         throw new Error(
-          `Gemini embedding failed after ${attempt} attempts: ${errorMessage}`
+          `Gemini embedding failed after ${attempt} attempts: ${safeErr}`
         );
       }
     }

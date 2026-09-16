@@ -70,20 +70,30 @@ export function parseReportingPeriod(
     return `${mmYyyyMatch[2]}-${month}`;
   }
 
-  // 3. Indian FY Quarter: Q1 FY26, Q2 FY2026, Q1-FY26, Q1FY26
-  const fyQuarterMatch = s.match(
-    /\bQ([1-4])\s*[-/]?\s*FY\s*'?([0-9]{2,4})\b/i
-  );
-  if (fyQuarterMatch && fyQuarterMatch[1] && fyQuarterMatch[2]) {
-    const quarter = parseInt(fyQuarterMatch[1], 10);
-    let fyYear = parseInt(fyQuarterMatch[2], 10);
-    if (fyYear < 100) fyYear += 2000;
+  // 3. Indian FY Quarter: Q1 FY26, Q2 FY2026, Q1-FY26, Q1FY26, FY26 Q1, FY26-Q1
+  const qFirstMatch = s.match(/\bQ([1-4])\s*[-/]?\s*FY\s*'?([0-9]{2,4})\b/i);
+  const fyFirstMatch = s.match(/\bFY\s*'?([0-9]{2,4})\s*[-/]?\s*Q([1-4])\b/i);
 
-    // Indian Financial Year: FY26 ends in Mar 2026, starts Apr 2025
-    // Q1 (Apr-Jun): fyYear - 1, month 06
-    // Q2 (Jul-Sep): fyYear - 1, month 09
-    // Q3 (Oct-Dec): fyYear - 1, month 12
-    // Q4 (Jan-Mar): fyYear, month 03
+  if (qFirstMatch && qFirstMatch[1] && qFirstMatch[2]) {
+    const quarter = parseInt(qFirstMatch[1], 10);
+    let fyYear = parseInt(qFirstMatch[2], 10);
+    if (fyYear < 100) fyYear += 2000;
+    switch (quarter) {
+      case 1:
+        return `${fyYear - 1}-06`;
+      case 2:
+        return `${fyYear - 1}-09`;
+      case 3:
+        return `${fyYear - 1}-12`;
+      case 4:
+        return `${fyYear}-03`;
+    }
+  }
+
+  if (fyFirstMatch && fyFirstMatch[1] && fyFirstMatch[2]) {
+    let fyYear = parseInt(fyFirstMatch[1], 10);
+    const quarter = parseInt(fyFirstMatch[2], 10);
+    if (fyYear < 100) fyYear += 2000;
     switch (quarter) {
       case 1:
         return `${fyYear - 1}-06`;
