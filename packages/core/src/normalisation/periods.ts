@@ -29,7 +29,7 @@ const MONTH_MAP: Record<string, string> = {
  * Extract 4-digit year from text (e.g. filename "Noto_MIS_June_2025.xlsx" -> 2025)
  */
 export function extractYearFromContext(text: string): number | undefined {
-  const match = text.match(/\b(20[2-3][0-9])\b/);
+  const match = text.match(/(?:^|[^0-9])(20[2-3][0-9])(?:[^0-9]|$)/);
   if (match && match[1]) {
     return parseInt(match[1], 10);
   }

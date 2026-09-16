@@ -16,9 +16,11 @@
     "db:migrate": "npm run db:migrate --workspace=@mis/db",
     "db:studio": "npm run db:studio --workspace=@mis/db",
     "db:seed": "npm run db:seed --workspace=@mis/db",
-    "db:seed:crm": "npm run db:seed:crm --workspace=@mis/db"
+    "db:seed:crm": "npm run db:seed:crm --workspace=@mis/db",
+    "test": "vitest run"
   },
   "devDependencies": {
-    "puppeteer-core": "^25.11.0"
+    "puppeteer-core": "^25.11.0",
+    "vitest": "^5.0.1"
   }
 }

@@ -50,7 +50,7 @@ export function parseRawNumber(raw: unknown): ParsedNumber | null {
   // Remove currency signs (₹, Rs, Rs., INR, $, USD, etc.), parentheses, %, and spaces
   let cleaned = str
     .replace(/[₹$€£]/g, '')
-    .replace(/\b(?:Rs\.?|INR|USD|EUR)\b/gi, '')
+    .replace(/(?:^|\b)(?:Rs\.?|INR|USD|EUR)(?:\b|\s*)/gi, '')
     .replace(/[()%]/g, '')
     .replace(/-/g, '')
     .trim();
