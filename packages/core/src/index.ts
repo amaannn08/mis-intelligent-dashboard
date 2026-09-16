@@ -1,28 +1,60 @@
 /**
- * @mis/core — Core business logic, parsing, normalization, chunking, embeddings, and RAG.
- * Minimal typed stub for Milestone 0 / Milestone 1; Milestone 2 implements pipeline modules.
+ * @mis/core — Portfolio MIS parsing, normalisation, chunking, embeddings, extraction, RAG, and pipeline.
  */
 
 export const CORE_VERSION = '0.1.0';
 
-export type JobStep = 'parse' | 'normalise' | 'extract' | 'chunk' | 'embed';
-export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
+// Types
+export * from './types.js';
 
-export interface ProcessingJobState {
-  step: JobStep;
-  status: JobStatus;
-  startedAt?: Date;
-  finishedAt?: Date;
-  error?: string;
-  log?: Record<string, unknown>;
-}
+// Parsing
+export { parseFile, parseXlsx, parsePdf } from './parsing/index.js';
 
-export interface ChunkMetadata {
-  company: string;
-  companyId: string;
-  reportingPeriod?: string;
-  sheetName?: string;
-  pageNumber?: number;
-  rowIndices?: number[];
-  [key: string]: unknown;
-}
+// Normalisation
+export {
+  parseRawNumber,
+  detectScale,
+  normalizeNumericValue,
+  parseReportingPeriod,
+  extractYearFromContext,
+  matchMetricLabel,
+  type ParsedNumber,
+  type ScaleMultiplier,
+  type MetricDefinitionLike,
+  type MetricMatchResult,
+} from './normalisation/index.js';
+
+// Chunking
+export {
+  chunkDocument,
+  estimateTokenCount,
+  type ChunkingOptions,
+  type ChunkingContext,
+} from './chunking/index.js';
+
+// Embeddings
+export {
+  embedTexts,
+  embedQuery,
+  type EmbedOptions,
+} from './embeddings/index.js';
+
+// Extraction
+export {
+  extractMetrics,
+  extractMetricsDeterministic,
+  extractMetricsWithDeepSeek,
+  type DeepSeekExtractOptions,
+} from './extraction/index.js';
+
+// RAG
+export {
+  answerQuery,
+  type AnswerQueryOptions,
+} from './rag/index.js';
+
+// Pipeline
+export {
+  processDocument,
+  type ProcessDocumentOptions,
+} from './pipeline/index.js';

@@ -4,7 +4,7 @@ import { extractMetricsDeterministic } from './deterministic.js';
 import { extractMetricsWithDeepSeek, type DeepSeekExtractOptions } from './deepseek.js';
 
 export { extractMetricsDeterministic } from './deterministic.js';
-export { extractMetricsWithDeepSeek } from './deepseek.js';
+export { extractMetricsWithDeepSeek, type DeepSeekExtractOptions } from './deepseek.js';
 
 const STANDARD_METRIC_KEYS = [
   'revenue',
