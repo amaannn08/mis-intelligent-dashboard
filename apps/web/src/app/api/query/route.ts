@@ -19,6 +19,15 @@ const querySchema = z.object({
   sessionId: z.string().uuid().optional(),
 });
 
+/**
+ * Escapes non-ASCII characters to \\uXXXX so JSON can be safely transported in HTTP headers.
+ */
+function toHeaderSafeJson(obj: unknown): string {
+  return JSON.stringify(obj).replace(/[\u007f-\uffff]/g, (c) => {
+    return '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4);
+  });
+}
+
 export async function POST(request: NextRequest) {
   let body: unknown;
   try {
@@ -155,7 +164,7 @@ export async function POST(request: NextRequest) {
     return result.toTextStreamResponse({
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
-        'X-Citations': JSON.stringify(allCitations),
+        'X-Citations': toHeaderSafeJson(allCitations),
       },
     });
   } catch (err: unknown) {

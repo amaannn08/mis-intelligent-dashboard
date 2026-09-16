@@ -73,7 +73,7 @@ Thumbs.db
 # ---------------------------------------------------------------------------
 # Uploaded MIS documents & local scratch data — user content, not source
 # ---------------------------------------------------------------------------
-/uploads/
+uploads/
 /storage/
 /scratch/
 /tmp/
