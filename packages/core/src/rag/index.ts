@@ -13,7 +13,15 @@ export interface AnswerQueryOptions {
   embedOptions?: EmbedOptions;
 }
 
-interface RetrievedChunkRow {
+export interface RetrieveChunksOptions {
+  question: string;
+  companyId?: string;
+  topK?: number;
+  minSimilarity?: number;
+  embedOptions?: EmbedOptions;
+}
+
+export interface RetrievedChunkRow {
   id: string;
   document_id: string;
   company_id: string;
@@ -27,29 +35,21 @@ interface RetrievedChunkRow {
 }
 
 /**
- * Answer a financial question using grounded RAG with pgvector cosine similarity,
- * structured source citations, and DeepSeek reasoning.
+ * Retrieve most relevant document chunks via pgvector cosine distance.
  */
-export async function answerQuery(
-  options: AnswerQueryOptions
-): Promise<RagAnswer> {
+export async function retrieveRelevantChunks(
+  options: RetrieveChunksOptions
+): Promise<RetrievedChunkRow[]> {
   const {
     question,
     companyId,
     topK = 8,
     minSimilarity = 0.60,
-    deepseekApiKey = process.env.DEEPSEEK_API_KEY,
-    deepseekBaseUrl = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
-    deepseekModel = process.env.DEEPSEEK_MODEL || 'deepseek-chat',
     embedOptions = {},
   } = options;
 
   if (!question.trim()) {
-    return {
-      answer: 'Please provide a valid question.',
-      citations: [],
-      usedChunks: [],
-    };
+    return [];
   }
 
   // 1. Embed query with Gemini (1536 dims)
@@ -85,18 +85,17 @@ export async function answerQuery(
     topK,
   ]);
 
-  const rows: RetrievedChunkRow[] = (queryResult as unknown as { rows: RetrievedChunkRow[] }).rows;
+  return (queryResult as unknown as { rows: RetrievedChunkRow[] }).rows;
+}
 
-  // 3. Handle empty retrieval
-  if (rows.length === 0) {
-    return {
-      answer: 'I cannot find this information in the uploaded MIS reports.',
-      citations: [],
-      usedChunks: [],
-    };
-  }
-
-  // 4. Build numbered context blocks
+/**
+ * Build context blocks, citations map, and grounded system prompt from retrieved chunk rows.
+ */
+export function buildRAGContext(rows: RetrievedChunkRow[]): {
+  fullContext: string;
+  systemPrompt: string;
+  allCitations: Citation[];
+} {
   const contextBlocks = rows.map((row: RetrievedChunkRow, i: number) => {
     const idx = i + 1;
     const meta = row.metadata || {};
@@ -111,11 +110,6 @@ export async function answerQuery(
 
   const fullContext = contextBlocks.join('\n\n');
 
-  // 5. Query DeepSeek with prompt contract
-  if (!deepseekApiKey) {
-    throw new Error('Missing DEEPSEEK_API_KEY in environment.');
-  }
-
   const systemPrompt = `You are the WEH Ventures Portfolio Intelligence Assistant. You answer questions strictly using the retrieved portfolio MIS document context below.
 
 CONTEXT:
@@ -128,6 +122,99 @@ INSTRUCTIONS:
    - If a number is directly stated in the context, report it as stated.
    - If you compute a metric (e.g. EBITDA margin, MoM growth, burn rate), explicitly label it [CALCULATED] and show the exact arithmetic: e.g. "Gross Margin was 42.0% [CALCULATED: (₹63L / ₹150L) * 100] [1]".
 4. REFUSAL POLICY: If the retrieved context does not contain the answer or does not have sufficient data to answer, state clearly: "I cannot find this information in the uploaded MIS reports." Never invent or extrapolate numbers.`;
+
+  const allCitations: Citation[] = rows.map((row, i) => {
+    const meta = row.metadata || {};
+    return {
+      index: i + 1,
+      documentId: row.document_id,
+      filename: row.filename,
+      reportingPeriod: row.reporting_period || String(meta.reportingPeriod || ''),
+      company: row.company_name,
+      chunkIndex: row.chunk_index,
+      snippet: row.content.slice(0, 200).replace(/\s+/g, ' ').trim(),
+    };
+  });
+
+  return { fullContext, systemPrompt, allCitations };
+}
+
+/**
+ * Extract citation markers [1], [2] from the LLM answer and map back to citations.
+ */
+export function extractCitations(answer: string, rows: RetrievedChunkRow[]): Citation[] {
+  const citationMatches = Array.from(answer.matchAll(/\[(\d+)\]/g));
+  const citedIndices = Array.from(
+    new Set(citationMatches.map((m) => parseInt(m[1]!, 10)))
+  ).sort((a, b) => a - b);
+
+  const citations: Citation[] = [];
+  for (const idx of citedIndices) {
+    const chunkRow = rows[idx - 1];
+    if (chunkRow) {
+      const meta = chunkRow.metadata || {};
+      const snippet = chunkRow.content.slice(0, 200).replace(/\s+/g, ' ').trim();
+      citations.push({
+        index: idx,
+        documentId: chunkRow.document_id,
+        filename: chunkRow.filename,
+        reportingPeriod: chunkRow.reporting_period || String(meta.reportingPeriod || ''),
+        company: chunkRow.company_name,
+        chunkIndex: chunkRow.chunk_index,
+        snippet,
+      });
+    }
+  }
+  return citations;
+}
+
+/**
+ * Answer a financial question using grounded RAG with pgvector cosine similarity,
+ * structured source citations, and DeepSeek reasoning.
+ */
+export async function answerQuery(
+  options: AnswerQueryOptions
+): Promise<RagAnswer> {
+  const {
+    question,
+    companyId,
+    topK = 8,
+    minSimilarity = 0.60,
+    deepseekApiKey = process.env.DEEPSEEK_API_KEY,
+    deepseekBaseUrl = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+    deepseekModel = process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+    embedOptions = {},
+  } = options;
+
+  if (!question.trim()) {
+    return {
+      answer: 'Please provide a valid question.',
+      citations: [],
+      usedChunks: [],
+    };
+  }
+
+  const rows = await retrieveRelevantChunks({
+    question,
+    companyId,
+    topK,
+    minSimilarity,
+    embedOptions,
+  });
+
+  if (rows.length === 0) {
+    return {
+      answer: 'I cannot find this information in the uploaded MIS reports.',
+      citations: [],
+      usedChunks: [],
+    };
+  }
+
+  const { systemPrompt } = buildRAGContext(rows);
+
+  if (!deepseekApiKey) {
+    throw new Error('Missing DEEPSEEK_API_KEY in environment.');
+  }
 
   const cleanBaseUrl = deepseekBaseUrl.replace(/\/+$/, '');
   const response = await fetch(`${cleanBaseUrl}/chat/completions`, {
@@ -156,30 +243,7 @@ INSTRUCTIONS:
   };
 
   const answer = completionData.choices?.[0]?.message?.content?.trim() || '';
-
-  // 6. Extract cited markers [1], [2], etc. from answer
-  const citationMatches = Array.from(answer.matchAll(/\[(\d+)\]/g));
-  const citedIndices = Array.from(
-    new Set(citationMatches.map((m) => parseInt(m[1]!, 10)))
-  ).sort((a, b) => a - b);
-
-  const citations: Citation[] = [];
-  for (const idx of citedIndices) {
-    const chunkRow = rows[idx - 1];
-    if (chunkRow) {
-      const meta = chunkRow.metadata || {};
-      const snippet = chunkRow.content.slice(0, 200).replace(/\s+/g, ' ').trim();
-      citations.push({
-        index: idx,
-        documentId: chunkRow.document_id,
-        filename: chunkRow.filename,
-        reportingPeriod: chunkRow.reporting_period || String(meta.reportingPeriod || ''),
-        company: chunkRow.company_name,
-        chunkIndex: chunkRow.chunk_index,
-        snippet,
-      });
-    }
-  }
+  const citations = extractCitations(answer, rows);
 
   const usedChunks = rows.map((row: RetrievedChunkRow) => ({
     id: row.id,

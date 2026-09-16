@@ -9,6 +9,7 @@ import {
   metricDefinitions,
   documentChunks,
   processingJobs,
+  documentBlobs,
 } from '@mis/db';
 import type { PipelineResult, ExtractedMetric } from '../types.js';
 import { parseFile } from '../parsing/index.js';
@@ -104,9 +105,18 @@ export async function processDocument(
     if (fs.existsSync(resolvedPath)) {
       fileBytes = fs.readFileSync(resolvedPath);
     } else {
-      throw new Error(
-        `File binary not found at resolved storage path: '${resolvedPath}'`
-      );
+      const [blobRow] = await db
+        .select()
+        .from(documentBlobs)
+        .where(eq(documentBlobs.documentId, documentId));
+
+      if (blobRow && blobRow.data) {
+        fileBytes = blobRow.data;
+      } else {
+        throw new Error(
+          `File binary not found at resolved storage path '${resolvedPath}' or in document_blobs`
+        );
+      }
     }
 
     // --- STEP 1: PARSE ---

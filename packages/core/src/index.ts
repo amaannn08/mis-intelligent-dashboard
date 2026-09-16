@@ -50,7 +50,12 @@ export {
 // RAG
 export {
   answerQuery,
+  retrieveRelevantChunks,
+  buildRAGContext,
+  extractCitations,
   type AnswerQueryOptions,
+  type RetrieveChunksOptions,
+  type RetrievedChunkRow,
 } from './rag/index.js';
 
 // Pipeline

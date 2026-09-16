@@ -1,4 +1,4 @@
-import { index, integer, pgTable, text, timestamp, uniqueIndex, uuid, varchar } from 'drizzle-orm/pg-core';
+import { boolean, index, integer, pgTable, text, timestamp, uniqueIndex, uuid, varchar } from 'drizzle-orm/pg-core';
 import { companies } from './companies';
 import { documentStatusEnum } from './enums';
 
@@ -18,6 +18,7 @@ export const documents = pgTable(
     checksum: text('checksum').notNull(),
     status: documentStatusEnum('status').notNull().default('pending'),
     error: text('error'),
+    originalRetained: boolean('original_retained').default(true).notNull(),
     uploadedAt: timestamp('uploaded_at', { withTimezone: true }).defaultNow().notNull(),
     processedAt: timestamp('processed_at', { withTimezone: true }),
   },
