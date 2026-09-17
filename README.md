@@ -79,6 +79,33 @@ mis-intelligent-dashboard/
     (Gemini embedding -> pgvector cosine Top-K -> Numbered Context -> DeepSeek stream)
 ```
 
+### Chat API Surface & Hybrid Retrieval Architecture
+
+#### Chat Session Management Endpoints
+- `GET /api/chat/sessions`: Lists the latest 50 chat sessions ordered by `updatedAt DESC` with `id`, `title`, `companyId`, `companyName`, `messageCount`, `lastMessagePreview`, and `updatedAt`.
+- `POST /api/chat/sessions`: Creates a new session (`{ companyId?: uuid | null, title?: string }`, default title `'New chat'`). Returns `{ session: { id, title, companyId, companyName } }`.
+- `GET /api/chat/sessions/[id]`: Returns session details and full chronological messages `[{ id, role, content, citations, createdAt }]`.
+- `PATCH /api/chat/sessions/[id]`: Updates session title or company scope (`companyId: null` targets entire portfolio).
+- `DELETE /api/chat/sessions/[id]`: Deletes session and cascades all messages. Returns `{ ok: true }`.
+- All session endpoints require authenticated session cookie (`mis_session`).
+
+#### Hybrid Retrieval Engine (`@mis/core`)
+Vector search alone cannot answer aggregate ranking questions ("which company has the highest burn?") or multi-company comparisons ("compare NOTO and Jar revenue"). The hybrid retrieval system resolves this deterministically:
+1. **Deterministic Question Router (`routeQuestion`)**:
+   - **Company Scope**: Resolves company mentions (case-insensitive name, slug, or parenthetical alias e.g. "Flent (Slaash)" $\to$ "Slaash"). Explicit question mentions take precedence over session scope; multi-company mentions trigger portfolio-wide scope (`companyId: null`).
+   - **Intent Classification**: Classifies intent as `'metrics'`, `'documents'`, or `'mixed'` based on metric keywords (`revenue`, `ebitda`, `gross_margin`, `burn`, `run_rate`), ranking words (`highest`, `lowest`, `top`, `compare`, `vs`), and narrative indicators (`why`, `how`, `commentary`).
+2. **Structured Retrieval Path**:
+   - For `'metrics'` and `'mixed'` intents, queries the `metrics` table with company and document joins.
+   - Computes latest period value, previous period value, MoM % change (using $|V_{prev}|$ in denominator for correct calculation on negative burn/losses), and source coordinates.
+   - For single-company queries, returns the series of the last 6 periods; for ranking queries, orders all portfolio companies by metric value.
+3. **Document Vector Path**:
+   - Runs pgvector cosine similarity search (`topK = 8` for company-scoped queries, `16` for portfolio-wide). Groups excerpts by company.
+   - Unifies document chunks with structured metric sources so every metric cited corresponds to a verified `[n]` citation.
+4. **Multi-turn Memory & Grounding Invariants**:
+   - Loads the last 6 messages of the session as `Conversation so far:`, with assistant messages truncated to ~1200 characters to resolve conversational pronouns (e.g. "and their burn?").
+   - Auto-titles initial sessions from the first 60 characters of the user prompt and updates `updatedAt`.
+   - Strictly enforces prompt invariant: *Numbers may ONLY come from retrieved context/metrics, not from conversation history.*
+
 ---
 
 ## 3. Prerequisites
@@ -189,7 +216,7 @@ Automated test suites are implemented in **Vitest** to protect the high-risk log
 npm run test
 ```
 
-### Test Coverage Summary (42 Passing Tests)
+### Test Coverage Summary (62 Passing Tests)
 
 1. **`tests/normalisation.test.ts`**:
    - **Label Resolution**: Resolves labels (`Net Revenue`, `Operating EBITDA`, `ARR`, `Net Cash Burn`) to canonical keys.
@@ -206,14 +233,21 @@ npm run test
    - **Citation Objects**: Extracts citation markers from answers and maps them to structured citation objects.
    - **Empty Retrieval Path**: Returns honest guidance when context contains no matching data without hallucination.
 4. **`tests/api-validation.test.ts`**:
-   - **Zod Schemas**: Rejects empty usernames, passwords, empty questions, invalid pagination limits, and non-UUID parameters.
+   - **Zod Schemas**: Rejects empty usernames, passwords, empty questions, invalid pagination limits, non-UUID parameters, and validates chat session schemas.
    - **File Size Ceilings**: Enforces 4.5 MB production ceiling and 15 MB development ceiling.
    - **Magic Byte Validation**: Detects and validates genuine XLSX (`PK\x03\x04`) and PDF (`%PDF-`) headers; rejects disguised files.
 5. **`tests/auth-middleware.test.ts`**:
    - **Session Tokens**: Verifies cryptographic HMAC-SHA256 signature verification and token expiration.
    - **Tamper Protection**: Rejects modified payloads with invalid signatures.
    - **Constant-time Auth**: Verifies credential checks run in constant time.
-   - **Route Gating**: Enforces 401 JSON error envelopes on API routes and redirects on page routes.
+   - **Route Gating**: Enforces 401 JSON error envelopes on API routes (`/api/companies`, `/api/chat/sessions`) and redirects on page routes.
+6. **`tests/hybrid-rag.test.ts`**:
+   - **Deterministic Question Router**: Company detection (single, multiple, none, session scope vs explicit mention, parenthetical alias); intent detection (`metrics` for "which company has the highest burn?", `documents` for "summarise NOTO's commentary", `mixed` for "why did revenue grow and what's the burn?"); metric key extraction.
+   - **Structured Context Builder**: MoM calculation with negative-value support; INR and percentage formatting; ranking and series context generation.
+   - **Prompt Invariants**: 6-message window; assistant truncation to ~1200 chars; strict prohibition of conversation history as a source of numbers.
+7. **`tests/chat-sessions.test.ts`**:
+   - **Lifecycle CRUD**: Session creation with default title `New chat`, listing with previews and message counts, retrieving session history, patching title and company scope (`null` for portfolio), and cascading deletion.
+   - **Auth Gate & Error Handling**: 401 for unauthenticated calls; 404 for non-existent session UUIDs.
 
 ---
 

@@ -47,15 +47,31 @@ export {
   type DeepSeekExtractOptions,
 } from './extraction/index.js';
 
-// RAG
+// RAG & Hybrid Retrieval
 export {
   answerQuery,
   retrieveRelevantChunks,
   buildRAGContext,
   extractCitations,
+  routeQuestion,
+  buildStructuredMetricsContext,
+  formatIndianCurrency,
+  formatPercent,
+  formatMetricValue,
+  calculateMoM,
+  formatConversationHistory,
+  buildGroupedDocumentContext,
+  buildHybridRAGPrompt,
   type AnswerQueryOptions,
   type RetrieveChunksOptions,
   type RetrievedChunkRow,
+  type RouteResult,
+  type RouteQuestionOptions,
+  type KnownCompany,
+  type MetricContextRow,
+  type StructuredContextOptions,
+  type HistoryMessage,
+  type HybridRAGContextOptions,
 } from './rag/index.js';
 
 // Pipeline

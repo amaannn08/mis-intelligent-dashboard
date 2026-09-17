@@ -29,8 +29,9 @@ const listQuerySchema = z.object({
 
 const querySchema = z.object({
   question: z.string().min(1, 'Question cannot be empty'),
-  companyId: z.string().uuid().optional(),
+  companyId: z.string().uuid().nullable().optional(),
   sessionId: z.string().uuid().optional(),
+  scope: z.string().optional(),
 });
 
 describe('API Validation: Zod Schemas', () => {
@@ -83,6 +84,7 @@ describe('API Validation: Zod Schemas', () => {
 
     const validUuid = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
     expect(querySchema.safeParse({ question: 'Revenue?', companyId: validUuid }).success).toBe(true);
+    expect(querySchema.safeParse({ question: 'Revenue?', companyId: null, sessionId: validUuid, scope: 'portfolio' }).success).toBe(true);
 
     // Empty question
     expect(querySchema.safeParse({ question: '' }).success).toBe(false);
@@ -90,6 +92,37 @@ describe('API Validation: Zod Schemas', () => {
 
     // Non-UUID companyId
     expect(querySchema.safeParse({ question: 'Revenue?', companyId: 'not-a-uuid' }).success).toBe(false);
+  });
+
+  it('validates chat session creation and patch schemas', () => {
+    const validUuid = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d';
+
+    const createSchema = z.object({
+      companyId: z.string().uuid().nullable().optional(),
+      title: z.string().optional(),
+    });
+
+    const patchSchema = z.object({
+      title: z.string().optional(),
+      companyId: z.string().uuid().nullable().optional(),
+    });
+
+    // Valid create bodies
+    expect(createSchema.safeParse({}).success).toBe(true);
+    expect(createSchema.safeParse({ title: 'New chat' }).success).toBe(true);
+    expect(createSchema.safeParse({ companyId: validUuid }).success).toBe(true);
+    expect(createSchema.safeParse({ companyId: null }).success).toBe(true);
+
+    // Invalid create
+    expect(createSchema.safeParse({ companyId: 'not-a-uuid' }).success).toBe(false);
+
+    // Valid patch bodies
+    expect(patchSchema.safeParse({ title: 'Renamed Chat' }).success).toBe(true);
+    expect(patchSchema.safeParse({ companyId: null }).success).toBe(true); // companyId: null = All portfolio
+    expect(patchSchema.safeParse({ companyId: validUuid }).success).toBe(true);
+
+    // Invalid patch
+    expect(patchSchema.safeParse({ companyId: 'invalid-id' }).success).toBe(false);
   });
 });
 

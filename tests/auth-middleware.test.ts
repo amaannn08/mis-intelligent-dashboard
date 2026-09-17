@@ -96,6 +96,17 @@ describe('Middleware: Route Protection & Gating', () => {
     expect(body.error).toBeDefined();
     expect(body.error.code).toBe('UNAUTHORIZED');
     expect(body.error.message).toContain('Authentication required');
+
+    // Chat sessions API must also be strictly protected
+    const chatReq = new NextRequest('http://localhost:3000/api/chat/sessions');
+    const chatRes = await middleware(chatReq);
+    expect(chatRes.status).toBe(401);
+    const chatBody = await chatRes.json();
+    expect(chatBody.error.code).toBe('UNAUTHORIZED');
+
+    const chatDetailReq = new NextRequest('http://localhost:3000/api/chat/sessions/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d');
+    const chatDetailRes = await middleware(chatDetailReq);
+    expect(chatDetailRes.status).toBe(401);
   });
 
   it('redirects unauthenticated page requests to /login with return target', async () => {

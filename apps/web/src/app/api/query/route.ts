@@ -4,19 +4,24 @@ import { streamText } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { apiError, handleZodError } from '@/lib/api-response';
 import {
-  buildRAGContext,
+  buildHybridRAGPrompt,
+  buildStructuredMetricsContext,
   extractCitations,
   retrieveRelevantChunks,
+  routeQuestion,
+  type MetricContextRow,
+  type RetrievedChunkRow,
 } from '@mis/core';
-import { db, chatSessions, chatMessages } from '@mis/db';
-import { eq } from 'drizzle-orm';
+import { db, pool, chatSessions, chatMessages, companies } from '@mis/db';
+import { desc, eq, isNull } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
 
 const querySchema = z.object({
   question: z.string().min(1, 'Question cannot be empty'),
-  companyId: z.string().uuid().optional(),
   sessionId: z.string().uuid().optional(),
+  companyId: z.string().uuid().nullable().optional(),
+  scope: z.string().optional(),
 });
 
 /**
@@ -41,41 +46,221 @@ export async function POST(request: NextRequest) {
     return handleZodError(parsed.error);
   }
 
-  const { question, companyId, sessionId } = parsed.data;
+  const { question, companyId: explicitCompanyId, sessionId } = parsed.data;
 
-  // 1. Retrieve relevant document chunks via @mis/core
-  let rows;
-  try {
-    rows = await retrieveRelevantChunks({
-      question,
-      companyId,
-      topK: 8,
-      minSimilarity: 0.60,
-    });
-  } catch (err: unknown) {
-    console.error('Failed to retrieve chunks for query:', err);
-    return apiError('INTERNAL_SERVER_ERROR', 'Failed to retrieve context for query.', 500);
+  // 1. If sessionId is provided, fetch or initialize session and load prior conversation history
+  let sessionCompanyId: string | null = explicitCompanyId || null;
+  let historyMessages: Array<{ role: string; content: string }> = [];
+
+  if (sessionId) {
+    try {
+      const [existingSession] = await db
+        .select()
+        .from(chatSessions)
+        .where(eq(chatSessions.id, sessionId));
+
+      if (existingSession) {
+        if (!sessionCompanyId && existingSession.companyId) {
+          sessionCompanyId = existingSession.companyId;
+        }
+
+        // Auto-title: when title is still 'New chat' or 'New Session' (or empty),
+        // set it to the first 60 chars of the first user question.
+        const currentTitle = (existingSession.title || '').trim();
+        if (!currentTitle || currentTitle === 'New chat' || currentTitle === 'New Session') {
+          const autoTitle = question.slice(0, 60).trim() || 'New chat';
+          await db
+            .update(chatSessions)
+            .set({ title: autoTitle, updatedAt: new Date() })
+            .where(eq(chatSessions.id, sessionId));
+        } else {
+          await db
+            .update(chatSessions)
+            .set({ updatedAt: new Date() })
+            .where(eq(chatSessions.id, sessionId));
+        }
+      } else {
+        // Create new session with auto-title
+        const autoTitle = question.slice(0, 60).trim() || 'New chat';
+        await db.insert(chatSessions).values({
+          id: sessionId,
+          companyId: sessionCompanyId || null,
+          title: autoTitle,
+        });
+      }
+
+      // Load the last 6 messages of that session before the new one
+      const rawHistory = await db
+        .select({
+          role: chatMessages.role,
+          content: chatMessages.content,
+        })
+        .from(chatMessages)
+        .where(eq(chatMessages.sessionId, sessionId))
+        .orderBy(desc(chatMessages.createdAt))
+        .limit(6);
+
+      // Put into chronological order
+      historyMessages = rawHistory.reverse();
+    } catch (err) {
+      console.error('Failed to resolve or update chat session:', err);
+    }
   }
 
-  // 2. Handle empty retrieval: honest "not found" refusal
-  if (!rows || rows.length === 0) {
+  // 2. Fetch known companies for deterministic routing
+  let knownCompanies: Array<{ id: string; name: string; slug: string }> = [];
+  try {
+    knownCompanies = await db
+      .select({
+        id: companies.id,
+        name: companies.name,
+        slug: companies.slug,
+      })
+      .from(companies)
+      .where(isNull(companies.archivedAt));
+  } catch (err) {
+    console.error('Failed to load known companies:', err);
+  }
+
+  // 3. Route question deterministically
+  const route = routeQuestion(question, {
+    sessionCompanyId,
+    knownCompanies,
+  });
+
+  const targetCompanyId = route.companyId;
+  const { intent, detectedCompanyNames, metricKeys } = route;
+
+  // 4. Structured retrieval path: when intent is 'metrics' or 'mixed'
+  let structuredRows: MetricContextRow[] = [];
+  let structuredContext = '';
+
+  if (intent === 'metrics' || intent === 'mixed') {
+    const isRanking = targetCompanyId === null || detectedCompanyNames.length > 1;
+    const isSingleCompany = targetCompanyId !== null && detectedCompanyNames.length <= 1;
+
+    try {
+      let querySql = `
+        SELECT 
+          m.id,
+          m.company_id AS "companyId",
+          c.name AS "companyName",
+          m.document_id AS "documentId",
+          d.filename,
+          m.metric_key AS "metricKey",
+          m.value,
+          m.unit,
+          m.reporting_period AS "reportingPeriod",
+          m.source_reference AS "sourceReference"
+        FROM metrics m
+        JOIN companies c ON c.id = m.company_id
+        JOIN documents d ON d.id = m.document_id
+        WHERE ($1::uuid IS NULL OR m.company_id = $1::uuid)
+      `;
+      const params: unknown[] = [targetCompanyId];
+
+      if (metricKeys.length > 0) {
+        querySql += ` AND m.metric_key = ANY($2::text[])`;
+        params.push(metricKeys);
+      }
+
+      querySql += ` ORDER BY c.name ASC, m.metric_key ASC, m.reporting_period ASC;`;
+
+      const { rows } = await pool.query(querySql, params);
+      structuredRows = rows;
+
+      structuredContext = buildStructuredMetricsContext({
+        rows: structuredRows,
+        isRanking,
+        singleCompany: isSingleCompany,
+      });
+    } catch (err) {
+      console.error('Failed to query structured metrics:', err);
+    }
+  }
+
+  // 5. Document vector retrieval path: topK = 8 for company-scoped, 16 for portfolio-wide
+  const topK = targetCompanyId ? 8 : 16;
+  let vectorRows: RetrievedChunkRow[] = [];
+  try {
+    vectorRows = await retrieveRelevantChunks({
+      question,
+      companyId: targetCompanyId || undefined,
+      topK,
+      minSimilarity: 0.55,
+    });
+  } catch (err) {
+    console.error('Failed to retrieve vector chunks for query:', err);
+  }
+
+  // 6. Connect structured metrics with document chunks for verifiable citations
+  if (structuredRows.length > 0) {
+    const existingDocIds = new Set(vectorRows.map((r) => r.document_id));
+    const missingDocIds = Array.from(
+      new Set(
+        structuredRows
+          .map((r) => r.documentId)
+          .filter((docId): docId is string => Boolean(docId && !existingDocIds.has(docId)))
+      )
+    );
+
+    if (missingDocIds.length > 0) {
+      try {
+        const missingDocsSql = `
+          SELECT DISTINCT ON (dc.document_id)
+            dc.id,
+            dc.document_id,
+            dc.company_id,
+            dc.chunk_index,
+            dc.content,
+            dc.metadata,
+            c.name AS company_name,
+            d.filename,
+            d.reporting_period,
+            0.70 AS similarity
+          FROM document_chunks dc
+          JOIN companies c ON c.id = dc.company_id
+          JOIN documents d ON d.id = dc.document_id
+          WHERE dc.document_id = ANY($1::uuid[])
+          ORDER BY dc.document_id, dc.chunk_index ASC;
+        `;
+        const { rows: additionalChunks } = await pool.query(missingDocsSql, [missingDocIds]);
+        vectorRows = [...vectorRows, ...additionalChunks];
+      } catch (err) {
+        console.error('Failed to retrieve chunks for structured metrics:', err);
+      }
+    }
+
+    // Attach citation index to structured rows
+    const docIdToChunkIndex = new Map<string, number>();
+    vectorRows.forEach((r, idx) => {
+      if (!docIdToChunkIndex.has(r.document_id)) {
+        docIdToChunkIndex.set(r.document_id, idx + 1);
+      }
+    });
+
+    for (const sRow of structuredRows) {
+      if (sRow.documentId && docIdToChunkIndex.has(sRow.documentId)) {
+        sRow.citationIndex = docIdToChunkIndex.get(sRow.documentId);
+      }
+    }
+
+    // Refresh structured context with verified citation tags
+    const isRanking = targetCompanyId === null || detectedCompanyNames.length > 1;
+    const isSingleCompany = targetCompanyId !== null && detectedCompanyNames.length <= 1;
+    structuredContext = buildStructuredMetricsContext({
+      rows: structuredRows,
+      isRanking,
+      singleCompany: isSingleCompany,
+    });
+  }
+
+  // 7. Handle empty retrieval: honest refusal
+  if ((!vectorRows || vectorRows.length === 0) && (!structuredRows || structuredRows.length === 0)) {
     const refusalText = 'I cannot find this information in the uploaded MIS reports.';
 
     if (sessionId) {
       try {
-        const [existing] = await db
-          .select({ id: chatSessions.id })
-          .from(chatSessions)
-          .where(eq(chatSessions.id, sessionId));
-
-        if (!existing) {
-          await db.insert(chatSessions).values({
-            id: sessionId,
-            companyId: companyId || null,
-            title: question.slice(0, 80),
-          });
-        }
-
         await db.insert(chatMessages).values([
           {
             sessionId,
@@ -90,6 +275,10 @@ export async function POST(request: NextRequest) {
             citations: [],
           },
         ]);
+        await db
+          .update(chatSessions)
+          .set({ updatedAt: new Date() })
+          .where(eq(chatSessions.id, sessionId));
       } catch (err) {
         console.error('Failed to persist chat session refusal:', err);
       }
@@ -104,8 +293,20 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // 3. Build grounded RAG context and system prompt via @mis/core
-  const { systemPrompt, allCitations } = buildRAGContext(rows);
+  // 8. Build hybrid RAG prompt with structured metrics, grouped document excerpts, and conversation history
+  let scopeCompanyName: string | undefined;
+  if (targetCompanyId) {
+    const matched = knownCompanies.find((c) => c.id === targetCompanyId);
+    scopeCompanyName = matched?.name;
+  }
+
+  const { systemPrompt, allCitations } = buildHybridRAGPrompt({
+    structuredContext,
+    documentRows: vectorRows,
+    historyMessages,
+    detectedCompanyNames,
+    scopeCompanyName,
+  });
 
   const deepseekApiKey = process.env.DEEPSEEK_API_KEY;
   if (!deepseekApiKey) {
@@ -126,20 +327,7 @@ export async function POST(request: NextRequest) {
       onFinish: async (event) => {
         if (sessionId) {
           try {
-            const [existing] = await db
-              .select({ id: chatSessions.id })
-              .from(chatSessions)
-              .where(eq(chatSessions.id, sessionId));
-
-            if (!existing) {
-              await db.insert(chatSessions).values({
-                id: sessionId,
-                companyId: companyId || null,
-                title: question.slice(0, 80),
-              });
-            }
-
-            const cited = extractCitations(event.text, rows);
+            const cited = extractCitations(event.text, vectorRows);
             await db.insert(chatMessages).values([
               {
                 sessionId,
@@ -154,6 +342,10 @@ export async function POST(request: NextRequest) {
                 citations: cited as unknown as Array<Record<string, unknown>>,
               },
             ]);
+            await db
+              .update(chatSessions)
+              .set({ updatedAt: new Date() })
+              .where(eq(chatSessions.id, sessionId));
           } catch (err) {
             console.error('Failed to persist chat message exchange:', err);
           }

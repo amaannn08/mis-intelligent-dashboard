@@ -1,6 +1,11 @@
 import { pool } from '@mis/db';
 import type { Citation, RagAnswer } from '../types.js';
 import { embedQuery, type EmbedOptions } from '../embeddings/index.js';
+import { formatConversationHistory, type HistoryMessage } from './history.js';
+
+export * from './router.js';
+export * from './structured.js';
+export * from './history.js';
 
 export interface AnswerQueryOptions {
   question: string;
@@ -137,6 +142,129 @@ INSTRUCTIONS:
   });
 
   return { fullContext, systemPrompt, allCitations };
+}
+
+export interface HybridRAGContextOptions {
+  structuredContext?: string;
+  documentRows?: RetrievedChunkRow[];
+  historyMessages?: HistoryMessage[];
+  detectedCompanyNames?: string[];
+  scopeCompanyName?: string;
+}
+
+/**
+ * Build document context blocks grouped by company, preserving sequential [1], [2] citation indices.
+ */
+export function buildGroupedDocumentContext(rows: RetrievedChunkRow[]): {
+  groupedText: string;
+  allCitations: Citation[];
+} {
+  if (!rows || rows.length === 0) {
+    return { groupedText: '', allCitations: [] };
+  }
+
+  // Group rows by company_name preserving sequential index
+  const byCompany = new Map<string, Array<{ row: RetrievedChunkRow; index: number }>>();
+
+  rows.forEach((row, i) => {
+    const company = row.company_name || 'Portfolio';
+    if (!byCompany.has(company)) {
+      byCompany.set(company, []);
+    }
+    byCompany.get(company)!.push({ row, index: i + 1 });
+  });
+
+  const sections: string[] = [];
+
+  for (const [company, items] of byCompany.entries()) {
+    const companyBlocks = items.map(({ row, index }) => {
+      const meta = row.metadata || {};
+      const sheetOrPage = meta.sheetName
+        ? `Sheet: ${meta.sheetName}`
+        : meta.pageNumber
+          ? `Page: ${meta.pageNumber}`
+          : 'Document';
+      const rowRef =
+        meta.rowStart && meta.rowEnd ? ` | Rows: ${meta.rowStart}-${meta.rowEnd}` : '';
+      const periodStr = row.reporting_period || meta.reportingPeriod || 'Unknown';
+
+      return `[${index}] Document: ${row.filename} | Period: ${periodStr} | ${sheetOrPage}${rowRef}\n${row.content}`;
+    });
+
+    sections.push(`### Company: ${company}\n${companyBlocks.join('\n\n')}`);
+  }
+
+  const groupedText = sections.join('\n\n');
+
+  const allCitations: Citation[] = rows.map((row, i) => {
+    const meta = row.metadata || {};
+    return {
+      index: i + 1,
+      documentId: row.document_id,
+      filename: row.filename,
+      reportingPeriod: row.reporting_period || String(meta.reportingPeriod || ''),
+      company: row.company_name,
+      chunkIndex: row.chunk_index,
+      snippet: row.content.slice(0, 200).replace(/\s+/g, ' ').trim(),
+    };
+  });
+
+  return { groupedText, allCitations };
+}
+
+/**
+ * Build hybrid RAG system prompt with structured metrics, grouped document excerpts, and conversation history.
+ */
+export function buildHybridRAGPrompt(options: HybridRAGContextOptions): {
+  systemPrompt: string;
+  allCitations: Citation[];
+} {
+  const {
+    structuredContext = '',
+    documentRows = [],
+    historyMessages = [],
+    detectedCompanyNames = [],
+    scopeCompanyName,
+  } = options;
+
+  const historyBlock = formatConversationHistory(historyMessages);
+  const { groupedText: docBlock, allCitations } = buildGroupedDocumentContext(documentRows);
+
+  const contextParts: string[] = [];
+  if (historyBlock) {
+    contextParts.push(historyBlock);
+  }
+  if (structuredContext) {
+    contextParts.push(structuredContext);
+  }
+  if (docBlock) {
+    contextParts.push(`DOCUMENT EXCERPTS:\n\n${docBlock}`);
+  }
+
+  const fullContext = contextParts.join('\n\n---\n\n');
+
+  let companyDirective = '';
+  if (detectedCompanyNames.length > 0) {
+    companyDirective = ` Explicitly state in the answer that the findings pertain to ${detectedCompanyNames.join(' and ')}.`;
+  } else if (scopeCompanyName) {
+    companyDirective = ` Explicitly state in the answer that the findings pertain to ${scopeCompanyName}.`;
+  }
+
+  const systemPrompt = `You are the WEH Ventures Portfolio Intelligence Assistant. You answer questions strictly using the retrieved portfolio MIS document context and structured metrics below.
+
+CONTEXT:
+${fullContext}
+
+INSTRUCTIONS:
+1. ANSWER FIRST: State the direct numerical answer in the first sentence.${companyDirective}
+2. CITATIONS: Cite sources using [1], [2] immediately following the facts they support. Every factual claim needs a [n] citation pointing at a real retrieved chunk or document reference.
+3. ALLOWED SOURCES & CONVERSATION HISTORY: Numbers may ONLY come from retrieved context/metrics, not from conversation history. The conversation history is provided strictly for resolving dialogue context (e.g. follow-up questions or pronouns). Never treat previous conversation messages as an allowed source of truth for financial numbers.
+4. REPORTED VS CALCULATED:
+   - If a number is directly stated in the context or structured metrics, report it as stated.
+   - If you compute a metric (e.g. EBITDA margin, MoM growth, burn rate), explicitly label it [CALCULATED] and show the exact arithmetic: e.g. "Gross Margin was 42.0% [CALCULATED: (₹63L / ₹150L) * 100] [1]".
+5. REFUSAL POLICY: If the retrieved context does not contain the answer or there is not enough data in the uploaded MIS documents to answer, state clearly: "I cannot find this information in the uploaded MIS reports." Never invent or extrapolate numbers.`;
+
+  return { systemPrompt, allCitations };
 }
 
 /**
