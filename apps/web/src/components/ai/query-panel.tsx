@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { CitationList, type Citation } from './citation-list';
@@ -168,12 +169,26 @@ export function QueryPanel({
           </div>
         </div>
 
-        {(streamingAnswer || error) && (
-          <Button variant="ghost" size="sm" onClick={handleClear} className="text-xs h-7 gap-1">
-            <RefreshCw className="w-3 h-3" />
-            <span>Reset</span>
+        <div className="flex items-center gap-1.5">
+          <Button
+            asChild
+            variant="ghost"
+            size="sm"
+            className="text-xs h-7 gap-1 text-muted-foreground hover:text-foreground"
+          >
+            <Link href={companyId ? `/chat?companyId=${companyId}` : '/chat'}>
+              <MessageSquare className="w-3 h-3" />
+              <span>Open in Chat</span>
+            </Link>
           </Button>
-        )}
+
+          {(streamingAnswer || error) && (
+            <Button variant="ghost" size="sm" onClick={handleClear} className="text-xs h-7 gap-1">
+              <RefreshCw className="w-3 h-3" />
+              <span>Reset</span>
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Answer Area (if there is an answer or error) */}

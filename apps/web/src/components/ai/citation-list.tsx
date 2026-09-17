@@ -6,6 +6,7 @@ import { formatPeriod } from '@/lib/formatters';
 import { FileText, ExternalLink } from 'lucide-react';
 
 export interface Citation {
+  index?: number;
   documentId?: string;
   filename?: string;
   companyName?: string;

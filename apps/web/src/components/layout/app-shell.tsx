@@ -17,10 +17,12 @@ import {
   Menu,
   X,
   ArrowRight,
+  MessageSquare,
 } from 'lucide-react';
 
 interface AppShellProps {
   children: React.ReactNode;
+  noPadding?: boolean;
 }
 
 interface CompanySearchResult {
@@ -31,7 +33,7 @@ interface CompanySearchResult {
   latestPeriod: string | null;
 }
 
-export function AppShell({ children }: AppShellProps) {
+export function AppShell({ children, noPadding = false }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -107,6 +109,7 @@ export function AppShell({ children }: AppShellProps) {
 
   const navItems = [
     { href: '/', label: 'Overview', icon: LayoutDashboard },
+    { href: '/chat', label: 'Chat', icon: MessageSquare },
     { href: '/companies', label: 'Companies', icon: Building2 },
     { href: '/settings', label: 'Settings', icon: Settings },
   ];
@@ -114,7 +117,7 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-background text-foreground">
       {/* Desktop Sidebar */}
-      <aside className="hidden md:flex md:w-60 lg:w-64 flex-col border-r border-border bg-card/60 backdrop-blur-md p-4 shrink-0 justify-between">
+      <aside className="hidden md:flex md:w-60 lg:w-64 flex-col border-r border-border bg-card/60 backdrop-blur-md p-4 shrink-0 justify-between md:h-screen md:sticky md:top-0">
         <div className="space-y-6">
           {/* Logo & Terminal Badge */}
           <div className="flex items-center justify-between px-2 pt-1">
@@ -280,8 +283,15 @@ export function AppShell({ children }: AppShellProps) {
       )}
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-x-hidden min-w-0 p-4 sm:p-6 lg:p-8">
-        <div className="max-w-7xl mx-auto space-y-6">{children}</div>
+      <main
+        className={cn(
+          'flex-1 min-w-0',
+          noPadding
+            ? 'h-[calc(100dvh-65px)] md:h-dvh flex flex-col overflow-hidden p-0'
+            : 'overflow-x-hidden p-4 sm:p-6 lg:p-8'
+        )}
+      >
+        {noPadding ? children : <div className="max-w-7xl mx-auto space-y-6">{children}</div>}
       </main>
 
       {/* ⌘K Command Palette Modal */}
@@ -363,6 +373,21 @@ export function AppShell({ children }: AppShellProps) {
                 <span className="font-medium text-foreground">Portfolio Overview</span>
               </div>
               <span className="text-[10px] text-muted-foreground font-mono">/</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setCommandOpen(false);
+                router.push('/chat');
+              }}
+              className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-muted text-left cursor-pointer transition-colors"
+            >
+              <div className="flex items-center gap-2.5">
+                <MessageSquare className="w-3.5 h-3.5 text-muted-foreground" />
+                <span className="font-medium text-foreground">AI Portfolio Chat</span>
+              </div>
+              <span className="text-[10px] text-muted-foreground font-mono">/chat</span>
             </button>
 
             <button

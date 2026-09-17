@@ -27,8 +27,8 @@ mis-intelligent-dashboard/
 ├── .env.example               # Documented template for environment variables
 ├── apps/
 │   └── web/                   # Next.js 15 App Router (React 19, Tailwind CSS v4, shadcn/ui)
-│       ├── src/app/           # Routes: /, /companies, /companies/[slug], /settings, /login, /api/*
-│       ├── src/components/    # Reusable UI primitives, AppShell, KPI cards, charts, dropzone
+│       ├── src/app/           # Routes: /, /chat, /companies, /companies/[slug], /settings, /login, /api/*
+│       ├── src/components/    # Reusable UI primitives, AppShell, Chat workspace, KPI cards, charts
 │       ├── src/lib/           # Server-only utilities (auth, companies, documents, formatters)
 │       └── src/middleware.ts  # Session authentication gating & public route whitelist
 ├── packages/
@@ -344,3 +344,28 @@ All routes and responsive breakpoints have been verified via headless Chromium w
 | **Document Center (Mobile)** | Mobile 412×915 | [`docs/screenshots/14_documents_mobile.png`](docs/screenshots/14_documents_mobile.png) | Mobile upload queue, filing cards, and action buttons |
 | **Settings (Mobile)** | Mobile 412×915 | [`docs/screenshots/15_settings_mobile.png`](docs/screenshots/15_settings_mobile.png) | Responsive diagnostics cards on mobile |
 | **Narrow Viewport (380px)** | Mobile 380×800 | [`docs/screenshots/16_viewport_380px.png`](docs/screenshots/16_viewport_380px.png) | Verified 0 horizontal overflow (`scrollWidth <= clientWidth`) |
+
+---
+
+## 13. Conversational Chat UI (Run C2)
+
+The conversational chat interface at `/chat` provides interactive portfolio exploration over the complete MIS database:
+
+- **Sessions & Multi-Turn Dialogue**: Persistent conversations grouped by `Today / Yesterday / Earlier` with inline renaming, delete confirmation dialogs, and 6-message window context memory.
+- **Dynamic Scope Switching**: Seamless scope selector ("All portfolio" + individual portfolio companies). Switching scopes PATCHes the active session and inserts a visible system divider into the thread (`— Scope changed to NOTO —`).
+- **Grounded Answers & Citations**: Token-by-token streaming answers from DeepSeek with markdown tables, bold highlights, lists, and inline citation markers `[1]`, `[2]`.
+- **Source Chunk Inspector Drawer**: Clicking any citation opens a slide-over `CitationDrawer` displaying the exact raw excerpt from the database, metadata coordinates (company, period, sheet/page, chunk index), and raw document download.
+- **Auto-Growing Composer**: Textarea with scope hint badges, Shift+Enter newline support, Stop button while streaming, and dynamic quick-suggestion chips.
+- **Responsive Architecture**: Collapsible 280px desktop rail and slide-over mobile drawer with hamburger trigger, verified for zero horizontal overflow at 412px.
+
+| Screen | Viewport | Preview | Description |
+|---|---|---|---|
+| **Chat Workspace (Desktop)** | Desktop 1440×900 | [`docs/screenshots/c2_01_chat_mounted.png`](docs/screenshots/c2_01_chat_mounted.png) | Desktop conversational UI with 280px left rail, scope picker, and composer |
+| **Portfolio Query Answer** | Desktop 1440×900 | [`docs/screenshots/c2_02_portfolio_answered.png`](docs/screenshots/c2_02_portfolio_answered.png) | Streamed portfolio answer with inline citation tags and grounding sources |
+| **Multi-Turn Follow-Up** | Desktop 1440×900 | [`docs/screenshots/c2_03_followup_answered.png`](docs/screenshots/c2_03_followup_answered.png) | Dialogue resolution utilizing conversation memory across turns |
+| **Persistence Across Reload** | Desktop 1440×900 | [`docs/screenshots/c2_04_persisted_after_reload.png`](docs/screenshots/c2_04_persisted_after_reload.png) | Full conversation and citation persistence restored on reload |
+| **Company-Scoped Query** | Desktop 1440×900 | [`docs/screenshots/c2_05_company_scoped.png`](docs/screenshots/c2_05_company_scoped.png) | Scope changed divider and company-specific financial query |
+| **Source Citation Drawer** | Desktop 1440×900 | [`docs/screenshots/c2_06_citation_drawer.png`](docs/screenshots/c2_06_citation_drawer.png) | Slide-over inspector rendering raw chunk text and file download |
+| **Mobile Drawer (412px)** | Mobile 412×915 | [`docs/screenshots/c2_07_mobile_drawer.png`](docs/screenshots/c2_07_mobile_drawer.png) | Slide-over session drawer with hamburger menu on mobile |
+| **Mobile Chat Thread (412px)** | Mobile 412×915 | [`docs/screenshots/c2_08_mobile_thread.png`](docs/screenshots/c2_08_mobile_thread.png) | Zero-overflow mobile thread with suggestions and bottom composer |
+
