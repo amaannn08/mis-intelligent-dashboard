@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse, after } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { apiError, apiSuccess, handleZodError } from '@/lib/api-response';
 import {
@@ -121,10 +122,23 @@ export async function POST(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const isSync = searchParams.get('sync') === 'true';
 
+  const invalidateCaches = () => {
+    try {
+      revalidatePath('/');
+      revalidatePath('/companies');
+      revalidatePath('/companies/[slug]', 'page');
+    } catch (e) {
+      console.error('Failed to revalidate paths after document upload:', e);
+    }
+  };
+
+  invalidateCaches();
+
   if (isSync && process.env.NODE_ENV !== 'production') {
     // Optional synchronous execution in dev for debugging convenience
     try {
       await processDocument(doc.id);
+      invalidateCaches();
     } catch (err) {
       console.error(`Synchronous processing failed for doc ${doc.id}:`, err);
     }
@@ -133,6 +147,7 @@ export async function POST(request: NextRequest) {
     after(async () => {
       try {
         await processDocument(doc.id);
+        invalidateCaches();
       } catch (err) {
         console.error(`Detached processing error for doc ${doc.id}:`, err);
       }

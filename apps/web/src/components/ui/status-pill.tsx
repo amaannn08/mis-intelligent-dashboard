@@ -16,62 +16,69 @@ interface StatusPillProps {
   showIcon?: boolean;
 }
 
-export function StatusPill({ status, className, showIcon = true }: StatusPillProps) {
-  const normStatus = status.toLowerCase();
+export function StatusPill({ status, className, showIcon = false }: StatusPillProps) {
+  const normStatus = (status || 'pending').toLowerCase();
 
   switch (normStatus) {
     case 'processed':
+    case 'ready':
+    case 'portfolio':
+    case 'success':
       return (
         <span
           className={cn(
-            'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20',
+            'inline-flex items-center gap-1.5 rounded-[4px] bg-[#E8F5EE] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#3D7A58] font-mono select-none dark:bg-[#1C2E24] dark:text-[#52B788]',
             className
           )}
         >
-          {showIcon && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />}
-          <span className="capitalize">Processed</span>
+          {showIcon && <CheckCircle2 className="w-3 h-3 text-current" />}
+          <span>Processed</span>
         </span>
       );
 
     case 'failed':
+    case 'error':
+    case 'pass':
       return (
         <span
           className={cn(
-            'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-destructive/10 text-destructive border border-destructive/20',
+            'inline-flex items-center gap-1.5 rounded-[4px] bg-[#FEF3F2] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#B42318] font-mono select-none dark:bg-[#341618] dark:text-[#F87171]',
             className
           )}
         >
-          {showIcon && <AlertCircle className="w-3.5 h-3.5 text-destructive" />}
-          <span className="capitalize">Failed</span>
+          {showIcon && <AlertCircle className="w-3 h-3 text-current" />}
+          <span>Failed</span>
         </span>
       );
 
     case 'parsing':
     case 'extracting':
     case 'embedding':
+    case 'active':
       return (
         <span
           className={cn(
-            'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/20 animate-pulse',
+            'inline-flex items-center gap-1.5 rounded-[4px] bg-[#FFEFE2] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#FF7102] font-mono select-none dark:bg-[#362215] dark:text-[#FFA057]',
             className
           )}
         >
-          {showIcon && <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600 dark:text-blue-400" />}
-          <span className="capitalize">{normStatus}…</span>
+          {showIcon && <Loader2 className="w-3 h-3 animate-spin text-current" />}
+          <span>{normStatus}…</span>
         </span>
       );
 
     case 'pending':
+    case 'uploaded':
     default:
       return (
         <span
           className={cn(
-            'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20',
+            'inline-flex items-center gap-1.5 rounded-[4px] bg-[#E8EEF7] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#3A5F8C] font-mono select-none dark:bg-[#1A2636] dark:text-[#7EA5D9]',
             className
           )}
         >
-          {showIcon && <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />}
-          <span className="capitalize">{normStatus}</span>
+          {showIcon && <Clock className="w-3 h-3 text-current" />}
+          <span>{normStatus}</span>
         </span>
       );
   }

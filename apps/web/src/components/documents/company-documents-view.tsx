@@ -2,11 +2,10 @@
 
 import * as React from 'react';
 import Link from 'next/link';
+import { PageShell } from '@/components/layout/page-shell';
 import { UploadDropzone } from './upload-dropzone';
 import { DocumentDetailDrawer } from './document-detail-drawer';
 import { StatusPill } from '@/components/ui/status-pill';
-import { Button } from '@/components/ui/button';
-import { DataTable, type ColumnDef } from '@/components/ui/data-table';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { formatBytes, formatPeriod } from '@/lib/formatters';
 import {
@@ -91,7 +90,6 @@ export function CompanyDocumentsView({
   // Handle document accepted from UploadDropzone
   const handleUploadAccepted = React.useCallback(
     (documentId: string, filename: string) => {
-      // Add optimistic pending row
       const optimisticDoc: DocumentRow = {
         id: documentId,
         filename,
@@ -105,177 +103,77 @@ export function CompanyDocumentsView({
         processedAt: null,
       };
 
-      setDocuments((prev) => [optimisticDoc, ...prev.filter((d) => d.id !== documentId)]);
-      // Immediately refresh from server
-      setTimeout(refreshDocuments, 500);
+      setDocuments((prev) => [optimisticDoc, ...prev]);
     },
-    [company.id, refreshDocuments]
+    [company.id]
   );
 
-  const handleDeleteConfirm = async () => {
+  // Handle delete document confirm
+  const handleConfirmDelete = async () => {
     if (!docToDelete) return;
     setIsDeleting(true);
+
     try {
       const res = await fetch(`/api/documents/${docToDelete.id}`, {
         method: 'DELETE',
       });
-      if (!res.ok) throw new Error('Failed to delete document');
 
-      setDocuments((prev) => prev.filter((d) => d.id !== docToDelete.id));
-      setDocToDelete(null);
-      if (selectedDocId === docToDelete.id) {
-        setSelectedDocId(null);
+      if (res.ok) {
+        setDocuments((prev) => prev.filter((d) => d.id !== docToDelete.id));
+        setDocToDelete(null);
       }
-    } catch (err: unknown) {
-      alert((err as Error).message || 'Failed to delete');
+    } catch (err) {
+      console.error('Failed to delete document:', err);
     } finally {
       setIsDeleting(false);
     }
   };
 
-  const columns: ColumnDef<DocumentRow>[] = [
-    {
-      key: 'filename',
-      header: 'File Name',
-      render: (row) => (
-        <div className="flex items-center gap-2.5">
-          <FileSpreadsheet className="w-4 h-4 text-muted-foreground shrink-0" />
-          <div className="truncate min-w-0">
-            <span className="font-semibold text-foreground truncate block">
-              {row.filename}
-            </span>
-            {row.error && (
-              <span className="text-[11px] text-destructive truncate block font-mono">
-                Error: {row.error}
-              </span>
-            )}
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: 'reportingPeriod',
-      header: 'Period',
-      render: (row) => (
-        <span className="font-mono text-xs text-foreground">
-          {row.reportingPeriod ? formatPeriod(row.reportingPeriod) : '—'}
-        </span>
-      ),
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (row) => <StatusPill status={row.status} />,
-    },
-    {
-      key: 'sizeBytes',
-      header: 'File Size',
-      align: 'right',
-      render: (row) => (
-        <span className="font-mono text-xs text-muted-foreground">
-          {row.sizeBytes ? formatBytes(row.sizeBytes) : '—'}
-        </span>
-      ),
-    },
-    {
-      key: 'uploadedAt',
-      header: 'Uploaded',
-      align: 'right',
-      render: (row) => (
-        <span className="font-mono text-xs text-muted-foreground">
-          {new Date(row.uploadedAt).toLocaleDateString('en-IN', {
-            month: 'short',
-            day: 'numeric',
-          })}
-        </span>
-      ),
-    },
-    {
-      key: 'actions',
-      header: 'Actions',
-      align: 'right',
-      render: (row) => (
-        <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setSelectedDocId(row.id)}
-            title="Inspect extracted metrics & job log"
-            className="h-7 text-xs px-2 gap-1 text-muted-foreground hover:text-foreground"
-          >
-            <Eye className="w-3.5 h-3.5" />
-            <span>Inspect</span>
-          </Button>
+  const processedCount = documents.filter((d) => d.status === 'processed').length;
+  const inFlightCount = documents.filter((d) =>
+    ['pending', 'parsing', 'extracting', 'embedding'].includes(d.status.toLowerCase())
+  ).length;
 
-          {row.status === 'processed' && (
-            <Button
-              asChild
-              variant="ghost"
-              size="sm"
-              title="Download file"
-              className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-            >
-              <a href={`/api/documents/${row.id}/file`} download={row.filename}>
-                <Download className="w-3.5 h-3.5" />
-              </a>
-            </Button>
-          )}
-
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setDocToDelete(row)}
-            title="Delete document"
-            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </Button>
-        </div>
-      ),
-    },
+  const statChips = [
+    { label: 'Total Filings', value: documents.length },
+    { label: 'Processed', value: processedCount },
+    ...(inFlightCount > 0 ? [{ label: 'Processing Live', value: inFlightCount }] : []),
   ];
 
   return (
-    <div className="space-y-6">
-      {/* Header & Back Link */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-xl border border-border bg-card shadow-2xs">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <Link
-              href={`/companies/${company.slug}`}
-              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Back to {company.name} Workspace</span>
-            </Link>
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">
-            Document Center — {company.name}
-          </h1>
-          <p className="text-xs text-muted-foreground">
-            Upload monthly MIS spreadsheets & PDFs, track live parsing progress, and inspect extracted data
-          </p>
-        </div>
-
+    <PageShell
+      title={`Document Center — ${company.name}`}
+      subtitle="Upload monthly MIS spreadsheets & PDFs, track live parsing progress, and inspect extracted data"
+      statChips={statChips}
+      rightSlot={
         <div className="flex items-center gap-2">
           {isPolling && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono font-medium bg-[#FFEFE2] dark:bg-[#2D1F16] text-[#FF7102] border border-[#FFD0AB] dark:border-[#FF7102]/40 shadow-xs">
               <RefreshCw className="w-3 h-3 animate-spin" />
               <span>Processing live…</span>
             </div>
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={refreshDocuments}
-            className="gap-1.5 text-xs h-8"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Refresh</span>
-          </Button>
-        </div>
-      </div>
 
+          <Link
+            href={`/companies/${company.slug}`}
+            prefetch
+            className="inline-flex items-center gap-1.5 rounded-full border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] px-3.5 py-1.5 text-xs font-semibold text-[#5A5650] dark:text-[#9A958E] hover:bg-[#F5F4F0] dark:hover:bg-[#26231F] transition-colors shadow-xs"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Workspace</span>
+          </Link>
+
+          <button
+            type="button"
+            onClick={refreshDocuments}
+            className="inline-flex items-center gap-1.5 rounded-full border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] px-3 py-1.5 text-xs font-semibold text-[#5A5650] dark:text-[#9A958E] hover:bg-[#F5F4F0] dark:hover:bg-[#26231F] transition-colors shadow-xs"
+          >
+            <RefreshCw className="w-3.5 h-3.5 text-[#FF7102]" />
+            <span>Refresh</span>
+          </button>
+        </div>
+      }
+    >
       {/* Upload Dropzone */}
       <UploadDropzone
         companyId={company.id}
@@ -285,92 +183,190 @@ export function CompanyDocumentsView({
       {/* Documents History Table */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-foreground">
-            Uploaded MIS Filings ({documents.length})
-          </h2>
-          <span className="text-xs text-muted-foreground">
-            Click any row to open the document detail drawer
+          <div className="flex items-center gap-2">
+            <FileSpreadsheet className="w-4 h-4 text-[#FF7102]" />
+            <h2 className="text-[10px] font-medium uppercase tracking-[0.22em] text-[#C8C3BB] font-mono">
+              Uploaded Filings ({documents.length})
+            </h2>
+          </div>
+          <span className="text-[11px] text-[#9A958E] font-mono">
+            Click any row to inspect extracted cell coordinates
           </span>
         </div>
 
-        <DataTable
-          columns={columns}
-          data={documents}
-          keyExtractor={(row) => row.id}
-          onRowClick={(row) => setSelectedDocId(row.id)}
-          emptyTitle="No documents uploaded yet"
-          emptyDescription={`Drop a financial MIS spreadsheet (.xlsx, .xls, .pdf) above to begin automated extraction for ${company.name}.`}
-          renderMobileCard={(row) => (
-            <div className="p-4 rounded-xl border border-border bg-card shadow-2xs space-y-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="font-medium text-xs text-foreground truncate">{row.filename}</div>
-                  <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
-                    {row.reportingPeriod ? formatPeriod(row.reportingPeriod) : 'Period pending'} ·{' '}
-                    {formatBytes(row.sizeBytes)}
+        {/* Desktop Table with CRM styling */}
+        <div className="hidden md:block rounded-2xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] overflow-hidden shadow-xs">
+          <table className="w-full text-sm text-left border-collapse">
+            <thead className="bg-[#FAFAF8] dark:bg-[#141210] border-b border-[#E8E5DE] dark:border-[#2E2A24] text-[10px] uppercase font-medium text-[#C8C3BB] tracking-[0.22em] font-mono select-none">
+              <tr>
+                <th scope="col" className="px-5 py-3.5 text-left w-72">
+                  Filename
+                </th>
+                <th scope="col" className="px-4 py-3.5 text-left w-36">
+                  Period
+                </th>
+                <th scope="col" className="px-3 py-3.5 text-left w-28">
+                  Format
+                </th>
+                <th scope="col" className="px-4 py-3.5 text-left w-28">
+                  Size
+                </th>
+                <th scope="col" className="px-4 py-3.5 text-left w-32">
+                  Status
+                </th>
+                <th scope="col" className="px-4 py-3.5 text-left w-36">
+                  Uploaded
+                </th>
+                <th scope="col" className="px-5 py-3.5 text-right w-36"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#E8E5DE] dark:divide-[#2E2A24]">
+              {documents.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-5 py-12 text-center text-xs text-[#9A958E] font-mono">
+                    No filings uploaded yet for {company.name}.
+                  </td>
+                </tr>
+              ) : (
+                documents.map((row) => (
+                  <tr
+                    key={row.id}
+                    onClick={() => setSelectedDocId(row.id)}
+                    className="hover:bg-[#F5F4F0] dark:hover:bg-[#26231F] transition-colors group cursor-pointer"
+                  >
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-7 h-7 rounded-[7px] bg-[#EEECE7] dark:bg-[#26231F] flex items-center justify-center text-[#9A958E] shrink-0">
+                          <FileSpreadsheet className="w-4 h-4" />
+                        </div>
+                        <div className="font-semibold text-xs text-[#1A1815] dark:text-[#FAFAF8] group-hover:text-[#FF7102] transition-colors truncate max-w-xs">
+                          {row.filename}
+                        </div>
+                      </div>
+                    </td>
+
+                    <td className="px-4 py-3.5 font-mono text-xs text-[#5A5650] dark:text-[#C8C3BB]">
+                      {row.reportingPeriod ? formatPeriod(row.reportingPeriod) : <span className="text-[#C8C3BB] italic">—</span>}
+                    </td>
+
+                    <td className="px-3 py-3.5 font-mono text-xs uppercase text-[#9A958E]">
+                      {row.fileType}
+                    </td>
+
+                    <td className="px-4 py-3.5 font-mono text-xs text-[#5A5650] dark:text-[#9A958E]">
+                      {formatBytes(row.sizeBytes)}
+                    </td>
+
+                    <td className="px-4 py-3.5">
+                      <StatusPill status={row.status} />
+                    </td>
+
+                    <td className="px-4 py-3.5 font-mono text-xs text-[#9A958E]">
+                      {new Date(row.uploadedAt).toLocaleDateString('en-IN', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })}
+                    </td>
+
+                    <td className="px-5 py-3.5 text-right">
+                      <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDocId(row.id)}
+                          title="Inspect document extraction"
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#5A5650] dark:text-[#9A958E] hover:text-[#FF7102] px-2 py-1 rounded-md hover:bg-white dark:hover:bg-[#1C1A17] transition-colors"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Inspect</span>
+                        </button>
+
+                        {row.status === 'processed' && (
+                          <a
+                            href={`/api/documents/${row.id}/file`}
+                            download={row.filename}
+                            title="Download filing"
+                            className="p-1 text-[#9A958E] hover:text-[#1A1815] transition-colors"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => setDocToDelete(row)}
+                          title="Delete filing"
+                          className="p-1 text-[#9A958E] hover:text-[#B42318] transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Mobile View */}
+        <div className="block md:hidden space-y-3">
+          {documents.length === 0 ? (
+            <div className="p-8 text-center text-xs text-[#9A958E] font-mono border border-dashed border-[#E8E5DE] rounded-2xl">
+              No filings uploaded yet for {company.name}.
+            </div>
+          ) : (
+            documents.map((row) => (
+              <div
+                key={row.id}
+                onClick={() => setSelectedDocId(row.id)}
+                className="p-4 rounded-2xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] shadow-xs space-y-3 cursor-pointer"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <FileSpreadsheet className="w-4 h-4 text-[#9A958E] shrink-0" />
+                    <div className="font-semibold text-xs text-[#1A1815] dark:text-[#FAFAF8] truncate">
+                      {row.filename}
+                    </div>
+                  </div>
+                  <StatusPill status={row.status} />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[#E8E5DE] dark:border-[#2E2A24] text-xs font-mono">
+                  <div>
+                    <span className="text-[10px] uppercase tracking-[0.14em] text-[#C8C3BB] block">Period</span>
+                    <span className="text-[#1A1815] dark:text-[#FAFAF8]">
+                      {row.reportingPeriod ? formatPeriod(row.reportingPeriod) : '—'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase tracking-[0.14em] text-[#C8C3BB] block">Size</span>
+                    <span className="text-[#9A958E]">{formatBytes(row.sizeBytes)}</span>
                   </div>
                 </div>
-                <StatusPill status={row.status} />
               </div>
-
-              {row.error && (
-                <div className="p-2 rounded bg-destructive/10 text-destructive text-[11px] font-mono">
-                  {row.error}
-                </div>
-              )}
-
-              <div className="flex items-center justify-between pt-2 border-t border-border/60">
-                <span className="text-[10px] text-muted-foreground font-mono">
-                  {new Date(row.uploadedAt).toLocaleDateString('en-IN', {
-                    month: 'short',
-                    day: 'numeric',
-                  })}
-                </span>
-                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setSelectedDocId(row.id)}
-                    className="h-7 text-xs px-2"
-                  >
-                    Inspect
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setDocToDelete(row)}
-                    className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
-              </div>
-            </div>
+            ))
           )}
-        />
+        </div>
       </div>
 
       {/* Document Detail Drawer */}
       <DocumentDetailDrawer
         documentId={selectedDocId}
         onClose={() => setSelectedDocId(null)}
-        onDeleted={(deletedId) => {
-          setDocuments((prev) => prev.filter((d) => d.id !== deletedId));
-          setSelectedDocId(null);
-        }}
       />
 
-      {/* Delete Confirmation Dialog */}
+      {/* Confirm Delete Dialog */}
       <ConfirmDialog
         isOpen={Boolean(docToDelete)}
         onClose={() => setDocToDelete(null)}
-        onConfirm={handleDeleteConfirm}
-        title="Delete MIS Document"
-        description={`Are you sure you want to permanently delete "${docToDelete?.filename}"? All extracted metrics, chunks, and embeddings for this filing will be removed.`}
-        confirmLabel="Delete Document"
+        onConfirm={handleConfirmDelete}
+        title="Delete MIS Filing"
+        description={`Are you sure you want to delete "${docToDelete?.filename}"? All extracted metrics and embeddings for this filing will be permanently erased.`}
+        confirmLabel="Delete Filing"
         variant="destructive"
         isLoading={isDeleting}
       />
-    </div>
+    </PageShell>
   );
 }

@@ -4,7 +4,6 @@ import * as React from 'react';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip } from '@/components/ui/tooltip';
-import { Badge } from '@/components/ui/badge';
 import { ArrowUpRight, ArrowDownRight, Minus, HelpCircle, Calculator } from 'lucide-react';
 
 export interface KpiCardProps {
@@ -20,7 +19,7 @@ export interface KpiCardProps {
   className?: string;
 }
 
-export function KpiCard({
+export const KpiCard = React.memo(function KpiCard({
   label,
   value,
   delta,
@@ -34,21 +33,30 @@ export function KpiCard({
 }: KpiCardProps) {
   if (status === 'loading') {
     return (
-      <div className={cn('p-5 rounded-xl border border-border bg-card shadow-2xs space-y-3', className)}>
+      <div
+        className={cn(
+          'flex flex-col justify-between rounded-2xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] px-4 py-3 shadow-xs space-y-3',
+          className
+        )}
+      >
         <div className="flex items-center justify-between">
-          <Skeleton className="h-4 w-24" />
-          <Skeleton className="h-4 w-12" />
+          <Skeleton className="h-3 w-20" />
+          <Skeleton className="h-3 w-10" />
         </div>
-        <Skeleton className="h-7 w-32" />
-        <div className="flex items-center justify-between pt-1">
-          <Skeleton className="h-3.5 w-16" />
-          <Skeleton className="h-3.5 w-16" />
+        <Skeleton className="h-7 w-28" />
+        <div className="flex items-center justify-between pt-1 border-t border-[#E8E5DE] dark:border-[#2E2A24]">
+          <Skeleton className="h-3 w-12" />
+          <Skeleton className="h-3 w-12" />
         </div>
       </div>
     );
   }
 
-  const isAvailable = value !== null && value !== undefined && value !== 'Not available' && value !== '—';
+  const isAvailable =
+    value !== null &&
+    value !== undefined &&
+    value !== 'Not available' &&
+    value !== '—';
 
   // Delta calculation display
   let deltaPositive = false;
@@ -67,13 +75,13 @@ export function KpiCard({
   return (
     <div
       className={cn(
-        'p-5 rounded-xl border border-border bg-card shadow-2xs flex flex-col justify-between transition-shadow hover:shadow-xs',
+        'group relative flex flex-col justify-between rounded-2xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] px-4 py-3 text-left shadow-xs transition-all hover:shadow-sm hover:border-[#FFD0AB] dark:hover:border-[#FF7102]/50',
         className
       )}
     >
-      {/* Top row: Label + badges/tooltips */}
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider truncate">
+      {/* Top row: Section heading in micro-label style */}
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-[0.22em] text-[#C8C3BB] font-mono truncate">
           {label}
         </span>
         <div className="flex items-center gap-1.5 shrink-0">
@@ -85,13 +93,10 @@ export function KpiCard({
                   : `Source metric: ${kind}`
               }
             >
-              <Badge
-                variant={kind === 'calculated' ? 'secondary' : 'outline'}
-                className="text-[10px] px-1.5 py-0 h-4.5 gap-1 font-mono cursor-help"
-              >
-                {kind === 'calculated' && <Calculator className="w-2.5 h-2.5 text-blue-500" />}
+              <span className="inline-flex items-center gap-0.5 rounded-[4px] bg-[#EEECE7] dark:bg-[#26231F] px-1.5 py-0.5 text-[9px] font-mono font-medium text-[#5A5650] dark:text-[#9A958E] cursor-help">
+                {kind === 'calculated' && <Calculator className="w-2.5 h-2.5 text-[#3A5F8C]" />}
                 {kind}
-              </Badge>
+              </span>
             </Tooltip>
           )}
 
@@ -100,7 +105,7 @@ export function KpiCard({
               <button
                 type="button"
                 aria-label="Metric details"
-                className="text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                className="text-[#9A958E] hover:text-[#1A1815] transition-colors"
               >
                 <HelpCircle className="w-3.5 h-3.5" />
               </button>
@@ -109,34 +114,34 @@ export function KpiCard({
         </div>
       </div>
 
-      {/* Main Value */}
-      <div className="my-1">
+      {/* Main Value in font-mono */}
+      <div className="my-2">
         {isAvailable ? (
-          <div className="text-2xl font-bold tracking-tight text-foreground font-mono tabular-nums">
+          <div className="text-2xl font-bold tracking-tight text-[#1A1815] dark:text-[#FAFAF8] font-mono tabular-nums">
             {value}
           </div>
         ) : (
           <Tooltip content={defaultUnavailableExplanation}>
-            <div className="text-lg font-medium text-muted-foreground/70 italic cursor-help">
-              Not available
+            <div className="text-base font-medium text-[#9A958E] italic cursor-help font-mono">
+              —
             </div>
           </Tooltip>
         )}
       </div>
 
       {/* Bottom row: Delta + Reporting Period */}
-      <div className="flex items-center justify-between text-xs mt-2 pt-2 border-t border-border/60">
+      <div className="flex items-center justify-between text-xs pt-2 border-t border-[#E8E5DE] dark:border-[#2E2A24]">
         {/* Delta */}
         <div>
           {isAvailable && delta !== undefined && delta !== null ? (
             <div
               className={cn(
-                'inline-flex items-center gap-0.5 font-medium tabular-nums font-mono',
+                'inline-flex items-center gap-0.5 font-medium tabular-nums font-mono text-[11px]',
                 isGood
-                  ? 'text-emerald-600 dark:text-emerald-400'
+                  ? 'text-[#3D7A58] dark:text-[#4E9A70]'
                   : deltaNegative || deltaPositive
-                  ? 'text-rose-600 dark:text-rose-400'
-                  : 'text-muted-foreground'
+                  ? 'text-[#B42318] dark:text-[#F87171]'
+                  : 'text-[#9A958E]'
               )}
             >
               {deltaPositive ? (
@@ -149,20 +154,20 @@ export function KpiCard({
               <span>
                 {delta > 0 ? `+${delta.toFixed(1)}%` : `${delta.toFixed(1)}%`}
               </span>
-              <span className="text-[10px] text-muted-foreground ml-0.5 font-sans">MoM</span>
+              <span className="text-[10px] text-[#9A958E] font-sans ml-0.5">MoM</span>
             </div>
           ) : (
-            <span className="text-muted-foreground/60 text-[11px]">No MoM baseline</span>
+            <span className="text-[#9A958E] text-[10px] font-mono">No baseline</span>
           )}
         </div>
 
         {/* Period */}
         {period && (
-          <span className="text-[11px] text-muted-foreground font-mono tabular-nums">
+          <span className="text-[10px] text-[#9A958E] font-mono tabular-nums">
             {period}
           </span>
         )}
       </div>
     </div>
   );
-}
+});

@@ -20,15 +20,20 @@ import {
   ChevronDown,
   Loader2,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
-export function ChatWorkspace() {
+export interface ChatWorkspaceProps {
+  initialCompanies?: CompanyOption[];
+}
+
+export function ChatWorkspace({ initialCompanies }: ChatWorkspaceProps = {}) {
   const searchParams = useSearchParams();
   const router = useRouter();
 
   const [sessions, setSessions] = React.useState<ChatSessionSummary[]>([]);
   const [activeSessionId, setActiveSessionId] = React.useState<string | null>(null);
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
-  const [companies, setCompanies] = React.useState<CompanyOption[]>([]);
+  const [companies, setCompanies] = React.useState<CompanyOption[]>(initialCompanies || []);
   const [isLoadingSessions, setIsLoadingSessions] = React.useState(true);
   const [isLoadingMessages, setIsLoadingMessages] = React.useState(false);
 
@@ -77,8 +82,9 @@ export function ChatWorkspace() {
     return companies.reduce((acc, c) => acc + (c.documentCount || 0), 0);
   }, [companies]);
 
-  // 1. Fetch companies list
+  // 1. Fetch companies list if not supplied via server props
   const fetchCompanies = React.useCallback(async () => {
+    if (initialCompanies && initialCompanies.length > 0) return;
     try {
       const res = await fetch('/api/companies?limit=100');
       if (res.ok) {
@@ -96,17 +102,16 @@ export function ChatWorkspace() {
           industry: c.industry,
           documentCount: c.documentCount || 0,
         }));
-        // Sort companies alphabetically
         list.sort((a, b) => a.name.localeCompare(b.name));
         setCompanies(list);
       }
     } catch (err) {
-      console.error('Failed to load companies for scope picker:', err);
+      console.error('Failed to fetch companies for chat scope:', err);
     }
-  }, []);
+  }, [initialCompanies]);
 
-  // 2. Fetch sessions list
-  const fetchSessions = React.useCallback(async (): Promise<ChatSessionSummary[]> => {
+  // 2. Fetch user's session list
+  const fetchSessions = React.useCallback(async () => {
     try {
       const res = await fetch('/api/chat/sessions');
       if (res.ok) {
@@ -116,37 +121,22 @@ export function ChatWorkspace() {
         return list;
       }
     } catch (err) {
-      console.error('Failed to load sessions:', err);
+      console.error('Failed to fetch chat sessions:', err);
     }
     return [];
   }, []);
 
-  // 3. Load messages for a session
+  // 3. Load messages for a given session
   const loadSessionMessages = React.useCallback(async (sessionId: string) => {
     setIsLoadingMessages(true);
     try {
       const res = await fetch(`/api/chat/sessions/${sessionId}`);
       if (res.ok) {
         const data = await res.json();
-        if (data.session) {
-          setSelectedCompanyId(data.session.companyId ?? null);
-        }
-        const loadedMsgs: ChatMessage[] = (data.messages || []).map((m: {
-          id: string;
-          role: string;
-          content: string;
-          citations?: unknown;
-          createdAt: string;
-        }) => ({
-          id: m.id,
-          role: (m.role as 'user' | 'assistant' | 'system') || 'assistant',
-          content: m.content,
-          citations: Array.isArray(m.citations) ? (m.citations as Citation[]) : [],
-          createdAt: m.createdAt,
-        }));
-        setMessages(loadedMsgs);
-      } else if (res.status === 404) {
-        // Session not found
+        const sessionDetail = data.session;
+        setMessages(sessionDetail.messages || []);
+        setSelectedCompanyId(sessionDetail.companyId);
+      } else {
         setActiveSessionId(null);
         setMessages([]);
       }
@@ -157,7 +147,7 @@ export function ChatWorkspace() {
     }
   }, []);
 
-  // 4. Initial Mount: load companies, sessions, and handle ?companyId=
+  // 4. Initial Mount: load sessions and handle ?companyId=
   React.useEffect(() => {
     let isMounted = true;
 
@@ -189,7 +179,6 @@ export function ChatWorkspace() {
             setActiveSessionId(newSession.id);
             setSelectedCompanyId(newSession.companyId);
             setMessages([]);
-            // Clean URL
             router.replace('/chat');
             setIsLoadingSessions(false);
             return;
@@ -214,7 +203,6 @@ export function ChatWorkspace() {
         setSelectedCompanyId(mostRecent.companyId);
         await loadSessionMessages(mostRecent.id);
       } else {
-        // Case D: Empty state (no auto-created junk sessions)
         setActiveSessionId(null);
         setMessages([]);
       }
@@ -254,8 +242,8 @@ export function ChatWorkspace() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          companyId: selectedCompanyId || null,
           title: 'New chat',
+          companyId: selectedCompanyId || null,
         }),
       });
 
@@ -264,6 +252,7 @@ export function ChatWorkspace() {
         const newSession = data.session;
         setSessions((prev) => [newSession, ...prev]);
         setActiveSessionId(newSession.id);
+        setSelectedCompanyId(newSession.companyId);
         setMessages([]);
       }
     } catch (err) {
@@ -271,7 +260,7 @@ export function ChatWorkspace() {
     }
   };
 
-  // Handle renaming session
+  // Rename session title
   const handleRenameSession = async (sessionId: string, newTitle: string) => {
     try {
       const res = await fetch(`/api/chat/sessions/${sessionId}`, {
@@ -290,7 +279,7 @@ export function ChatWorkspace() {
     }
   };
 
-  // Handle deleting session
+  // Delete session
   const handleDeleteSession = async (sessionId: string) => {
     try {
       const res = await fetch(`/api/chat/sessions/${sessionId}`, {
@@ -304,9 +293,11 @@ export function ChatWorkspace() {
         if (activeSessionId === sessionId) {
           if (remaining.length > 0) {
             setActiveSessionId(remaining[0].id);
+            setSelectedCompanyId(remaining[0].companyId);
             loadSessionMessages(remaining[0].id);
           } else {
             setActiveSessionId(null);
+            setSelectedCompanyId(null);
             setMessages([]);
           }
         }
@@ -316,84 +307,68 @@ export function ChatWorkspace() {
     }
   };
 
-  // Handle changing scope via Scope Picker
+  // Save inline edited title in header
+  const handleSaveHeaderTitle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeSessionId) return;
+    const trimmed = titleInput.trim();
+    if (trimmed && trimmed !== activeSession?.title) {
+      await handleRenameSession(activeSessionId, trimmed);
+    }
+    setIsEditingTitle(false);
+  };
+
+  // Scope switcher
   const handleScopeChange = async (newCompanyId: string | null) => {
-    const targetComp = newCompanyId ? companies.find((c) => c.id === newCompanyId) : null;
-    const scopeLabel = targetComp ? targetComp.name : 'All portfolio';
+    if (newCompanyId === selectedCompanyId) return;
 
     setSelectedCompanyId(newCompanyId);
 
-    // If there is an active session, patch it and add a visible divider
+    const targetCompany = newCompanyId ? companies.find((c) => c.id === newCompanyId) : null;
+    const scopeLabel = targetCompany ? targetCompany.name : 'All portfolio';
+
+    // Insert system message indicating scope changed
+    const systemNotice: ChatMessage = {
+      id: `sys-${Date.now()}`,
+      role: 'system',
+      content: `Scope switched to ${scopeLabel}`,
+      createdAt: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, systemNotice]);
+
     if (activeSessionId) {
       try {
-        const res = await fetch(`/api/chat/sessions/${activeSessionId}`, {
+        await fetch(`/api/chat/sessions/${activeSessionId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ companyId: newCompanyId }),
         });
 
-        if (res.ok) {
-          // Update in sessions list
-          setSessions((prev) =>
-            prev.map((s) =>
-              s.id === activeSessionId
-                ? {
-                    ...s,
-                    companyId: newCompanyId,
-                    companyName: targetComp ? targetComp.name : null,
-                  }
-                : s
-            )
-          );
-
-          // Add visible system divider into the thread
-          const dividerMsg: ChatMessage = {
-            id: `scope-divider-${Date.now()}`,
-            role: 'system',
-            content: `Scope changed to ${scopeLabel}`,
-            createdAt: new Date().toISOString(),
-          };
-          setMessages((prev) => [...prev, dividerMsg]);
-        }
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.id === activeSessionId
+              ? {
+                  ...s,
+                  companyId: newCompanyId,
+                  companyName: targetCompany?.name || null,
+                  companySlug: targetCompany?.slug || null,
+                }
+              : s
+          )
+        );
       } catch (err) {
-        console.error('Failed to patch session company scope:', err);
+        console.error('Failed to update session scope:', err);
       }
     }
   };
 
-  // Handle stopping the active stream
-  const handleStopStream = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    setIsStreaming(false);
-
-    // If there was partial streaming text, commit it as an assistant message
-    if (streamingText) {
-      const partialMsg: ChatMessage = {
-        id: `assistant-partial-${Date.now()}`,
-        role: 'assistant',
-        content: streamingText,
-        citations: streamingCitations,
-        createdAt: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, partialMsg]);
-      setStreamingText('');
-      setStreamingCitations([]);
-    }
-  };
-
-  // Core send message handler
-  const handleSendMessage = async (queryText: string) => {
-    const text = queryText.trim();
-    if (!text || isStreaming) return;
+  // Send message
+  const handleSendMessage = async (text: string) => {
+    if (!text.trim() || isStreaming) return;
 
     setLastQuestion(text);
 
     let currentSessionId = activeSessionId;
-
-    // If on empty state with no active session, create one first
     if (!currentSessionId) {
       try {
         const createRes = await fetch('/api/chat/sessions', {
@@ -500,52 +475,62 @@ export function ChatWorkspace() {
         citations: parsedCitations,
         createdAt: new Date().toISOString(),
       };
+
       setMessages((prev) => [...prev, finalAssistantMsg]);
       setStreamingText('');
       setStreamingCitations([]);
 
-      // Refresh sessions in background to update title and relative time
-      fetchSessions();
+      // Auto-update session title if it was "New chat"
+      if (currentSessionId && activeSession && activeSession.title === 'New chat') {
+        const generatedTitle = text.slice(0, 45).trim() + (text.length > 45 ? '…' : '');
+        handleRenameSession(currentSessionId, generatedTitle);
+      }
     } catch (err: unknown) {
-      if ((err as Error).name !== 'AbortError') {
-        const errorMsg = (err as Error).message || 'An error occurred while streaming response.';
-        const errorAssistantMsg: ChatMessage = {
-          id: `assistant-err-${Date.now()}`,
+      const isAbort = (err as { name?: string })?.name === 'AbortError';
+      if (isAbort) {
+        if (streamingText) {
+          const abortedMsg: ChatMessage = {
+            id: `assistant-${Date.now()}`,
+            role: 'assistant',
+            content: `${streamingText} *(generation stopped)*`,
+            citations: streamingCitations,
+            createdAt: new Date().toISOString(),
+          };
+          setMessages((prev) => [...prev, abortedMsg]);
+        }
+      } else {
+        const errorMsg: ChatMessage = {
+          id: `error-${Date.now()}`,
           role: 'assistant',
           content: '',
-          error: errorMsg,
+          error: err instanceof Error ? err.message : 'A network error occurred while querying the portfolio database.',
           createdAt: new Date().toISOString(),
         };
-        setMessages((prev) => [...prev, errorAssistantMsg]);
+        setMessages((prev) => [...prev, errorMsg]);
       }
     } finally {
       setIsStreaming(false);
+      setStreamingText('');
+      setStreamingCitations([]);
       abortControllerRef.current = null;
     }
   };
 
-  // Handle Retry
+  const handleStopStream = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+  };
+
   const handleRetry = () => {
     if (lastQuestion) {
       handleSendMessage(lastQuestion);
     }
   };
 
-  // Save header title inline edit
-  const handleSaveHeaderTitle = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!activeSessionId) return;
-
-    const trimmed = titleInput.trim();
-    if (trimmed) {
-      await handleRenameSession(activeSessionId, trimmed);
-    }
-    setIsEditingTitle(false);
-  };
-
   return (
-    <div className="flex-1 flex h-full overflow-hidden bg-background">
-      {/* Left Rail (Conversations sidebar) */}
+    <div className="flex h-full w-full overflow-hidden bg-[#FAFAF8] dark:bg-[#141210]">
+      {/* Sessions Sidebar */}
       <ChatSidebar
         sessions={sessions}
         activeSessionId={activeSessionId}
@@ -561,15 +546,15 @@ export function ChatWorkspace() {
 
       {/* Main Center Area */}
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
-        {/* Center Header */}
-        <header className="p-3 sm:px-5 sm:py-3.5 border-b border-border bg-card/70 backdrop-blur-md flex items-center justify-between gap-3 shrink-0">
+        {/* Center Header with CRM styling */}
+        <header className="px-4 py-3 sm:px-6 border-b border-[#E8E5DE] dark:border-[#2E2A24] bg-[#FAFAF8]/95 dark:bg-[#141210]/95 backdrop-blur shrink-0 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             {/* Mobile hamburger menu */}
             <button
               type="button"
               onClick={() => setIsMobileDrawerOpen(true)}
               aria-label="Open conversation history"
-              className="md:hidden p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+              className="md:hidden p-1.5 rounded-lg text-[#9A958E] hover:text-[#1A1815] hover:bg-[#F5F4F0] dark:hover:bg-[#26231F] transition-colors cursor-pointer"
             >
               <Menu className="w-5 h-5" />
             </button>
@@ -580,7 +565,7 @@ export function ChatWorkspace() {
                 type="button"
                 onClick={() => setIsSidebarCollapsed(false)}
                 aria-label="Expand conversations sidebar"
-                className="hidden md:flex p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                className="hidden md:flex p-1.5 rounded-lg text-[#9A958E] hover:text-[#1A1815] hover:bg-[#F5F4F0] dark:hover:bg-[#26231F] transition-colors cursor-pointer"
                 title="Expand conversations sidebar"
               >
                 <PanelLeft className="w-4 h-4" />
@@ -599,12 +584,12 @@ export function ChatWorkspace() {
                     onKeyDown={(e) => {
                       if (e.key === 'Escape') setIsEditingTitle(false);
                     }}
-                    className="bg-background border border-ring text-sm font-semibold px-2 py-0.5 rounded focus:outline-none max-w-[200px] sm:max-w-xs"
+                    className="bg-white dark:bg-[#1C1A17] border border-[#FF7102] text-xs font-semibold px-2 py-0.5 rounded-lg focus:outline-none max-w-[200px] sm:max-w-xs"
                   />
                   <button
                     type="submit"
                     aria-label="Save title"
-                    className="p-1 text-primary hover:bg-muted rounded cursor-pointer"
+                    className="p-1 text-[#FF7102] hover:bg-[#F5F4F0] rounded cursor-pointer"
                   >
                     <Check className="w-3.5 h-3.5" />
                   </button>
@@ -612,7 +597,7 @@ export function ChatWorkspace() {
                     type="button"
                     aria-label="Cancel editing"
                     onClick={() => setIsEditingTitle(false)}
-                    className="p-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded cursor-pointer"
+                    className="p-1 text-[#9A958E] hover:text-[#1A1815] hover:bg-[#F5F4F0] rounded cursor-pointer"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -628,11 +613,11 @@ export function ChatWorkspace() {
                   className="group flex items-center gap-1.5 cursor-pointer select-none"
                   title="Click to rename session"
                 >
-                  <h1 className="text-sm sm:text-base font-semibold text-foreground truncate max-w-[180px] sm:max-w-md">
+                  <h1 className="text-sm sm:text-base font-semibold text-[#1A1815] dark:text-[#FAFAF8] truncate max-w-[180px] sm:max-w-md">
                     {activeSession ? activeSession.title : 'New conversation'}
                   </h1>
                   {activeSession && (
-                    <Edit2 className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-80 transition-opacity" />
+                    <Edit2 className="w-3 h-3 text-[#9A958E] opacity-0 group-hover:opacity-80 transition-opacity" />
                   )}
                 </div>
               )}
@@ -642,23 +627,28 @@ export function ChatWorkspace() {
           {/* Scope Picker & Grounded Indicator */}
           <div className="flex items-center gap-2 shrink-0">
             {/* Grounded Documents Indicator */}
-            <div className="hidden lg:flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/40 px-2.5 py-1 rounded-full border border-border/60">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+            <div className="hidden lg:flex items-center gap-1.5 text-[11px] font-mono text-[#5A5650] dark:text-[#9A958E] bg-white dark:bg-[#1C1A17] px-3 py-1 rounded-full border border-[#E8E5DE] dark:border-[#2E2A24] shadow-xs">
+              <ShieldCheck className="w-3.5 h-3.5 text-[#3D7A58]" />
               <span>
                 {activeCompany
-                  ? `Grounded in ${activeCompany.documentCount || 0} document${activeCompany.documentCount === 1 ? '' : 's'}`
-                  : `Grounded in ${totalDocumentsCount} portfolio documents`}
+                  ? `Grounded: ${activeCompany.documentCount || 0} doc${activeCompany.documentCount === 1 ? '' : 's'}`
+                  : `Grounded: ${totalDocumentsCount} portfolio docs`}
               </span>
             </div>
 
-            {/* Scope Picker Dropdown */}
+            {/* Scope Picker Dropdown in CRM ScopePill style */}
             <div className="relative inline-block">
               <div className="relative flex items-center">
                 <select
                   value={selectedCompanyId || ''}
                   onChange={(e) => handleScopeChange(e.target.value ? e.target.value : null)}
                   aria-label="Filter scope to all portfolio or a company"
-                  className="appearance-none bg-card hover:bg-muted/80 text-foreground border border-border rounded-lg pl-8 pr-7 py-1 text-xs font-medium cursor-pointer shadow-2xs focus:outline-none focus:ring-2 focus:ring-ring transition-colors"
+                  className={cn(
+                    'appearance-none rounded-full border pl-8 pr-7 py-1 text-[11px] font-mono font-medium cursor-pointer shadow-xs focus:outline-none transition-colors',
+                    selectedCompanyId
+                      ? 'border-[#FFD0AB] bg-[#FFEFE2] text-[#FF7102] dark:bg-[#2D1F16] dark:border-[#FF7102]/50'
+                      : 'border-[#E8E5DE] bg-white text-[#5A5650] hover:bg-[#F5F4F0] dark:border-[#2E2A24] dark:bg-[#1C1A17] dark:text-[#9A958E]'
+                  )}
                 >
                   <option value="">All portfolio</option>
                   {companies.map((comp) => (
@@ -668,16 +658,16 @@ export function ChatWorkspace() {
                   ))}
                 </select>
 
-                <div className="absolute left-2.5 pointer-events-none text-muted-foreground">
+                <div className="absolute left-2.5 pointer-events-none text-[#FF7102]">
                   {selectedCompanyId ? (
-                    <Building2 className="w-3.5 h-3.5 text-primary" />
+                    <Building2 className="w-3.5 h-3.5" />
                   ) : (
-                    <Sparkles className="w-3.5 h-3.5 text-primary" />
+                    <Sparkles className="w-3.5 h-3.5" />
                   )}
                 </div>
 
-                <div className="absolute right-2 pointer-events-none text-muted-foreground">
-                  <ChevronDown className="w-3.5 h-3.5" />
+                <div className="absolute right-2 pointer-events-none text-[#9A958E]">
+                  <ChevronDown className="w-3 h-3" />
                 </div>
               </div>
             </div>
@@ -686,14 +676,14 @@ export function ChatWorkspace() {
 
         {/* Messages Thread */}
         {isLoadingSessions ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-muted-foreground">
-            <Loader2 className="w-6 h-6 animate-spin text-primary" />
-            <span className="text-xs">Loading conversations…</span>
+          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-[#9A958E]">
+            <Loader2 className="w-6 h-6 animate-spin text-[#FF7102]" />
+            <span className="text-xs font-mono">Loading conversations…</span>
           </div>
         ) : isLoadingMessages ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-muted-foreground">
-            <Loader2 className="w-6 h-6 animate-spin text-primary" />
-            <span className="text-xs">Loading conversation history…</span>
+          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-[#9A958E]">
+            <Loader2 className="w-6 h-6 animate-spin text-[#FF7102]" />
+            <span className="text-xs font-mono">Loading conversation history…</span>
           </div>
         ) : (
           <ChatThread

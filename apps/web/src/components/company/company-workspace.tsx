@@ -3,13 +3,13 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { PageShell } from '@/components/layout/page-shell';
 import { KpiCard } from '@/components/dashboard/kpi-card';
 import { TrendChart, type ChartDataPoint } from '@/components/dashboard/trend-chart';
 import { MetricTable, type MetricRowData } from '@/components/dashboard/metric-table';
 import { QueryPanel } from '@/components/ai/query-panel';
 import { StatusPill } from '@/components/ui/status-pill';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Modal } from '@/components/ui/modal';
 import {
@@ -25,6 +25,7 @@ import {
   Clock,
   FileSpreadsheet,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface CompanyData {
   id: string;
@@ -209,55 +210,41 @@ export function CompanyWorkspace({
     });
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Workspace Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-xl border border-border bg-card shadow-2xs">
-        <div className="space-y-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground truncate">
-              {company.name}
-            </h1>
-            {company.industry && (
-              <Badge variant="outline" className="text-xs font-normal">
-                {company.industry}
-              </Badge>
-            )}
-            {latestPeriod && (
-              <Badge variant="secondary" className="text-xs font-mono">
-                Latest: {formatPeriod(latestPeriod)}
-              </Badge>
-            )}
-          </div>
-          {company.description && (
-            <p className="text-xs text-muted-foreground line-clamp-2 max-w-2xl">
-              {company.description}
-            </p>
-          )}
-        </div>
+  const statChips = [
+    { label: 'Industry', value: company.industry || 'Tech' },
+    { label: 'Filings', value: documents.length },
+    { label: 'Latest Period', value: latestPeriod ? formatPeriod(latestPeriod) : '—' },
+  ];
 
-        <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
-          <Button
-            variant="outline"
-            size="sm"
+  return (
+    <PageShell
+      title={company.name}
+      subtitle={company.description || undefined}
+      statChips={statChips}
+      rightSlot={
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
             onClick={() => setIsEditOpen(true)}
-            className="gap-1.5 text-xs h-8"
+            className="inline-flex items-center gap-1.5 rounded-full border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] px-3 py-1.5 text-xs font-semibold text-[#5A5650] dark:text-[#9A958E] hover:bg-[#F5F4F0] dark:hover:bg-[#26231F] shadow-xs transition-colors cursor-pointer"
           >
             <Edit2 className="w-3.5 h-3.5" />
-            <span>Edit</span>
-          </Button>
+            <span>Edit Profile</span>
+          </button>
 
-          <Button asChild size="sm" className="gap-1.5 text-xs h-8">
-            <Link href={`/companies/${company.slug}/documents`}>
-              <Upload className="w-3.5 h-3.5" />
-              <span>Upload MIS</span>
-            </Link>
-          </Button>
+          <Link
+            href={`/companies/${company.slug}/documents`}
+            prefetch
+            className="inline-flex items-center gap-1.5 rounded-full bg-[#FF7102] hover:bg-[#ff8a3a] px-3.5 py-1.5 text-xs font-semibold text-white shadow-[0_4px_14px_rgba(255,113,2,0.25)] transition-all cursor-pointer"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span>Upload MIS</span>
+          </Link>
         </div>
-      </div>
-
+      }
+    >
       {/* 5 Standard KPI Cards Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {kpiCardsData.map((kpi) => (
           <KpiCard
             key={kpi.key}
@@ -275,10 +262,10 @@ export function CompanyWorkspace({
 
       {/* Historical Trend Chart Section */}
       <div className="space-y-3">
-        {/* Metric Selector Tabs + Period Range Selector */}
+        {/* Metric Selector Tabs + Period Range Selector in CRM ScopePill style */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           {/* Metric Selector Tabs */}
-          <div className="flex flex-wrap gap-1 p-1 rounded-lg bg-muted/50 border border-border">
+          <div className="flex flex-wrap gap-1.5">
             {standardKpiKeys.map((def) => {
               const isSelected = selectedMetric === def.key;
               return (
@@ -286,11 +273,12 @@ export function CompanyWorkspace({
                   key={def.key}
                   type="button"
                   onClick={() => setSelectedMetric(def.key)}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                  className={cn(
+                    'inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition-colors cursor-pointer select-none shadow-xs',
                     isSelected
-                      ? 'bg-card text-foreground shadow-2xs font-semibold'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
+                      ? 'border-[#FFD0AB] bg-[#FFEFE2] dark:bg-[#2D1F16] text-[#FF7102] font-semibold'
+                      : 'border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] text-[#5A5650] dark:text-[#9A958E] hover:bg-[#F5F4F0] dark:hover:bg-[#26231F]'
+                  )}
                 >
                   {def.label}
                 </button>
@@ -305,11 +293,12 @@ export function CompanyWorkspace({
                 key={range}
                 type="button"
                 onClick={() => setPeriodRange(range)}
-                className={`px-2.5 py-1 rounded text-[11px] font-mono transition-colors cursor-pointer ${
+                className={cn(
+                  'px-2.5 py-1 rounded-full text-[10px] font-mono font-semibold transition-colors cursor-pointer border',
                   periodRange === range
-                    ? 'bg-primary text-primary-foreground font-semibold'
-                    : 'text-muted-foreground hover:bg-muted'
-                }`}
+                    ? 'bg-[#FF7102] text-white border-[#FF7102] shadow-xs'
+                    : 'border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] text-[#9A958E] hover:bg-[#F5F4F0] dark:hover:bg-[#26231F]'
+                )}
               >
                 {range}
               </button>
@@ -328,15 +317,15 @@ export function CompanyWorkspace({
       </div>
 
       {/* Complete Financial Metrics Matrix Table */}
-      <div className="space-y-2">
+      <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold text-foreground">
+            <FileSpreadsheet className="w-4 h-4 text-[#FF7102]" />
+            <h2 className="text-[10px] font-medium uppercase tracking-[0.22em] text-[#C8C3BB] font-mono">
               Extracted Financial Metrics Matrix
             </h2>
           </div>
-          <span className="text-xs text-muted-foreground">
+          <span className="text-[11px] text-[#9A958E] font-mono">
             Click any cell to inspect source coordinates
           </span>
         </div>
@@ -348,79 +337,88 @@ export function CompanyWorkspace({
       </div>
 
       {/* Bottom Row: Scoped AI Query Panel + Recent MIS Documents */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Company-Scoped AI Query Panel (7 cols on lg) */}
-        <div className="lg:col-span-7">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        {/* Scoped AI Query Panel */}
+        <div className="lg:col-span-6">
           <QueryPanel
             companyId={company.id}
-            companyName={company.name}
-            placeholder={`Ask about ${company.name}'s revenue, margins, cash burn, or filings…`}
+            placeholder={`Ask a question about ${company.name}'s performance or trends…`}
           />
         </div>
 
-        {/* Recent Documents Card (5 cols on lg) */}
-        <div className="lg:col-span-5 rounded-xl border border-border bg-card p-5 shadow-2xs space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-muted-foreground" />
-              <h3 className="text-sm font-semibold text-foreground">Recent MIS Filings</h3>
-            </div>
-            <Button asChild size="sm" variant="ghost" className="h-7 text-xs px-2">
-              <Link href={`/companies/${company.slug}/documents`}>
-                <span>Manage</span>
-                <ArrowRight className="w-3 h-3 ml-1" />
+        {/* Recent MIS Documents Card */}
+        <div className="lg:col-span-6 rounded-2xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] p-4 sm:p-5 shadow-xs flex flex-col justify-between space-y-4">
+          <div>
+            <div className="flex items-center justify-between border-b border-[#E8E5DE] dark:border-[#2E2A24] pb-3 mb-2">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-[#FF7102]" />
+                <h3 className="text-[10px] font-medium uppercase tracking-[0.22em] text-[#C8C3BB] font-mono">
+                  Uploaded Filings
+                </h3>
+              </div>
+              <Link
+                href={`/companies/${company.slug}/documents`}
+                prefetch
+                className="text-xs font-semibold text-[#FF7102] hover:underline inline-flex items-center gap-1"
+              >
+                <span>Manage all ({documents.length})</span>
+                <ArrowRight className="w-3 h-3" />
               </Link>
-            </Button>
-          </div>
-
-          {documents.length === 0 ? (
-            <div className="text-xs text-muted-foreground italic py-8 text-center border border-dashed border-border rounded-lg space-y-2">
-              <p>No MIS reports uploaded for {company.name} yet.</p>
-              <Button asChild size="sm">
-                <Link href={`/companies/${company.slug}/documents`}>
-                  <Upload className="w-3.5 h-3.5 mr-1.5" />
-                  <span>Upload First MIS</span>
-                </Link>
-              </Button>
             </div>
-          ) : (
-            <div className="divide-y divide-border border border-border rounded-lg overflow-hidden">
-              {documents.slice(0, 5).map((doc) => (
-                <div
-                  key={doc.id}
-                  className="p-3 flex items-center justify-between gap-3 hover:bg-muted/30 transition-colors text-xs"
-                >
-                  <div className="truncate min-w-0">
-                    <div className="font-medium text-foreground truncate">{doc.filename}</div>
-                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
-                      {doc.reportingPeriod && (
-                        <span>{formatPeriod(doc.reportingPeriod)}</span>
-                      )}
-                      <span>· {formatBytes(doc.sizeBytes)}</span>
-                    </div>
-                  </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+            {documents.length === 0 ? (
+              <div className="text-xs text-[#9A958E] font-mono italic py-8 text-center">
+                No filings uploaded for this company yet.
+              </div>
+            ) : (
+              <div className="divide-y divide-[#E8E5DE] dark:divide-[#2E2A24]">
+                {documents.slice(0, 4).map((doc) => (
+                  <div
+                    key={doc.id}
+                    className="py-2.5 flex items-center justify-between gap-3 text-xs"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <FileSpreadsheet className="w-4 h-4 text-[#9A958E] shrink-0" />
+                      <div className="truncate">
+                        <div className="font-semibold text-xs text-[#1A1815] dark:text-[#FAFAF8] truncate">
+                          {doc.filename}
+                        </div>
+                        <div className="text-[11px] text-[#9A958E] font-mono">
+                          {doc.reportingPeriod ? formatPeriod(doc.reportingPeriod) : 'Unspecified period'} · {formatBytes(doc.sizeBytes)}
+                        </div>
+                      </div>
+                    </div>
                     <StatusPill status={doc.status} />
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="pt-2 border-t border-[#E8E5DE] dark:border-[#2E2A24] flex items-center justify-end">
+            <Link
+              href={`/companies/${company.slug}/documents`}
+              prefetch
+              className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-[#FF7102] hover:bg-[#ff8a3a] text-white shadow-xs transition-colors"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>Upload New Filing</span>
+            </Link>
+          </div>
         </div>
       </div>
 
-      {/* Edit Company Modal */}
+      {/* Edit Company Modal Dialog */}
       <Modal
         isOpen={isEditOpen}
         onClose={() => setIsEditOpen(false)}
-        title="Edit Company Details"
-        description="Update company name, industry sector, or description."
+        title="Edit Portfolio Company"
+        description="Update company profile and sectoral tags."
         maxWidth="md"
       >
         <form onSubmit={handleEditSubmit} className="space-y-4 pt-2">
           {editError && (
-            <div className="p-3 rounded-lg border border-destructive/20 bg-destructive/10 text-destructive text-xs">
+            <div className="p-3 rounded-xl border border-[#FECDCA] dark:border-[#B42318]/40 bg-[#FEF3F2] dark:bg-[#341618] text-[#B42318] dark:text-[#F87171] text-xs">
               {editError}
             </div>
           )}
@@ -439,42 +437,49 @@ export function CompanyWorkspace({
             id="edit-company-industry"
             value={editIndustry}
             onChange={(e) => setEditIndustry(e.target.value)}
+            placeholder="e.g. HealthTech, D2C, FinTech"
             disabled={isSaving}
           />
 
           <div className="space-y-1.5">
             <label
               htmlFor="edit-company-desc"
-              className="block text-xs font-medium text-muted-foreground"
+              className="block text-[10px] font-medium uppercase tracking-[0.22em] text-[#C8C3BB] font-mono"
             >
-              Description
+              Description (Optional)
             </label>
             <textarea
               id="edit-company-desc"
               rows={3}
               value={editDesc}
               onChange={(e) => setEditDesc(e.target.value)}
+              placeholder="Brief overview of business model and core offerings…"
               disabled={isSaving}
-              className="w-full rounded-md border border-input bg-card px-3 py-1.5 text-sm shadow-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-full rounded-xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-[#FAFAF8] dark:bg-[#141210] px-3 py-2 text-xs text-[#1A1815] dark:text-[#FAFAF8] placeholder:text-[#9A958E] focus:outline-none focus:border-[#FF7102]"
             />
           </div>
 
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#E8E5DE] dark:border-[#2E2A24]">
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={() => setIsEditOpen(false)}
               disabled={isSaving}
+              className="text-xs rounded-xl"
             >
               Cancel
             </Button>
-            <Button type="submit" size="sm" disabled={isSaving}>
+            <button
+              type="submit"
+              disabled={isSaving}
+              className="inline-flex items-center justify-center rounded-xl bg-[#FF7102] hover:bg-[#ff8a3a] px-4 py-1.5 text-xs font-semibold text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+            >
               {isSaving ? 'Saving…' : 'Save Changes'}
-            </Button>
+            </button>
           </div>
         </form>
       </Modal>
-    </div>
+    </PageShell>
   );
 }

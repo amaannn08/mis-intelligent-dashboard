@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { apiError, apiSuccess } from '@/lib/api-response';
 import { deleteDocument, getDocumentDetail } from '@/lib/documents';
 import { isUuid } from '@/lib/companies';
@@ -45,6 +46,13 @@ export async function DELETE(
     const deleted = await deleteDocument(id);
     if (!deleted) {
       return apiError('NOT_FOUND', `Document with ID '${id}' not found.`, 404);
+    }
+    try {
+      revalidatePath('/');
+      revalidatePath('/companies');
+      revalidatePath('/companies/[slug]', 'page');
+    } catch (e) {
+      console.error('Failed to revalidate paths after document deletion:', e);
     }
     return apiSuccess({ ok: true }, 200);
   } catch (err: unknown) {

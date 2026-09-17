@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { apiError, apiSuccess, handleZodError } from '@/lib/api-response';
 import { createCompany, getCompaniesList } from '@/lib/companies';
@@ -63,6 +64,13 @@ export async function POST(request: NextRequest) {
 
   try {
     const company = await createCompany(parsed.data);
+    try {
+      revalidatePath('/');
+      revalidatePath('/companies');
+      revalidatePath('/chat');
+    } catch (e) {
+      console.error('Failed to revalidate paths after creating company:', e);
+    }
     return apiSuccess(company, 201);
   } catch (err: unknown) {
     console.error('Failed to create company:', err);

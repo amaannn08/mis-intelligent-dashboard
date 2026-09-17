@@ -106,7 +106,7 @@ export function UploadDropzone({
           file,
           status: 'error',
           progress: 0,
-          errorMessage: `Unsupported file type (${ext}). Only .xlsx, .xls, and .pdf are accepted.`,
+          errorMessage: `Invalid format (${ext}). Supported: .xlsx, .xls, .pdf`,
         });
         return;
       }
@@ -116,7 +116,7 @@ export function UploadDropzone({
           file,
           status: 'error',
           progress: 0,
-          errorMessage: `File exceeds the ${maxMbLabel} upload limit (${formatBytes(file.size)}).`,
+          errorMessage: `File exceeds maximum upload ceiling (${maxMbLabel})`,
         });
         return;
       }
@@ -129,20 +129,29 @@ export function UploadDropzone({
       validFiles.push(file);
     });
 
-    setQueue((prev) => [...prev, ...newItems]);
+    setQueue((prev) => [...newItems, ...prev]);
 
-    // Start upload immediately for valid files
-    for (const f of validFiles) {
-      uploadFile(f);
-    }
+    validFiles.forEach((file) => {
+      uploadFile(file);
+    });
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       validateAndQueueFiles(e.dataTransfer.files);
     }
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragOver(false);
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -154,26 +163,19 @@ export function UploadDropzone({
     }
   };
 
-  const removeQueueItem = (index: number) => {
-    setQueue((prev) => prev.filter((_, i) => i !== index));
-  };
-
   return (
     <div className={cn('space-y-4', className)}>
-      {/* Dropzone Container */}
+      {/* Drop Target Box */}
       <div
-        onDragOver={(e) => {
-          e.preventDefault();
-          setIsDragOver(true);
-        }}
-        onDragLeave={() => setIsDragOver(false)}
         onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
         onClick={() => fileInputRef.current?.click()}
         className={cn(
-          'relative flex flex-col items-center justify-center p-8 sm:p-10 rounded-xl border-2 border-dashed transition-all cursor-pointer select-none text-center',
+          'relative flex flex-col items-center justify-center p-8 rounded-2xl border-2 border-dashed transition-all cursor-pointer text-center select-none shadow-xs',
           isDragOver
-            ? 'border-primary bg-primary/5 scale-[1.005]'
-            : 'border-border bg-card hover:bg-muted/20 hover:border-muted-foreground/40'
+            ? 'border-[#FF7102] bg-[#FFEFE2]/50 dark:bg-[#2D1F16]/50'
+            : 'border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] hover:border-[#FFD0AB] hover:bg-[#FAFAF8] dark:hover:bg-[#26231F]'
         )}
       >
         <input
@@ -186,41 +188,41 @@ export function UploadDropzone({
           aria-label="Upload MIS files"
         />
 
-        <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center mb-3">
-          <UploadCloud className="w-6 h-6" />
+        <div className="w-10 h-10 rounded-[7px] bg-[#FFEFE2] dark:bg-[#2D1F16] text-[#FF7102] flex items-center justify-center mb-3">
+          <UploadCloud className="w-5 h-5" />
         </div>
 
-        <h4 className="text-sm font-semibold text-foreground mb-1">
-          Drop MIS spreadsheet or PDF here, or <span className="text-primary underline">browse</span>
+        <h4 className="text-xs font-semibold text-[#1A1815] dark:text-[#FAFAF8] mb-1">
+          Drop MIS spreadsheet or PDF here, or <span className="text-[#FF7102] underline">browse</span>
         </h4>
-        <p className="text-xs text-muted-foreground max-w-sm mb-3">
-          Supports .xlsx, .xls, and .pdf monthly reports. Extraction starts asynchronously upon upload.
+        <p className="text-[11px] text-[#9A958E] max-w-sm mb-3">
+          Supports .xlsx, .xls, and .pdf monthly reports. Extraction starts automatically upon upload.
         </p>
 
-        <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-[11px] font-medium bg-muted text-muted-foreground border border-border/60">
-          <span>Max file size: <strong className="text-foreground">{maxMbLabel}</strong></span>
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-mono text-[#5A5650] dark:text-[#9A958E] bg-[#FAFAF8] dark:bg-[#141210] border border-[#E8E5DE] dark:border-[#2E2A24]">
+          <span>Max size: <strong className="text-[#1A1815] dark:text-[#FAFAF8]">{maxMbLabel}</strong></span>
           <span>·</span>
-          <span>Automatic SHA-256 deduplication</span>
+          <span>SHA-256 deduplicated</span>
         </div>
       </div>
 
       {/* Upload Queue Display */}
       {queue.length > 0 && (
         <div className="space-y-2">
-          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+          <div className="text-[10px] font-medium uppercase tracking-[0.22em] text-[#C8C3BB] font-mono">
             Upload Queue ({queue.length})
           </div>
-          <div className="divide-y divide-border rounded-xl border border-border bg-card overflow-hidden">
+          <div className="divide-y divide-[#E8E5DE] dark:divide-[#2E2A24] rounded-2xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] overflow-hidden shadow-xs">
             {queue.map((item, index) => (
               <div
                 key={`${item.file.name}-${index}`}
                 className="p-3 flex items-center justify-between gap-3 text-xs"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <FileSpreadsheet className="w-4 h-4 text-muted-foreground shrink-0" />
+                  <FileSpreadsheet className="w-4 h-4 text-[#9A958E] shrink-0" />
                   <div className="truncate">
-                    <div className="font-medium text-foreground truncate">{item.file.name}</div>
-                    <div className="text-[11px] text-muted-foreground">
+                    <div className="font-semibold text-xs text-[#1A1815] dark:text-[#FAFAF8] truncate">{item.file.name}</div>
+                    <div className="text-[10px] text-[#9A958E] font-mono">
                       {formatBytes(item.file.size)}
                     </div>
                   </div>
@@ -228,39 +230,36 @@ export function UploadDropzone({
 
                 <div className="flex items-center gap-3 shrink-0">
                   {item.status === 'uploading' && (
-                    <div className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400">
+                    <div className="flex items-center gap-1.5 text-xs text-[#FF7102] font-mono">
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
                       <span>Uploading…</span>
                     </div>
                   )}
 
                   {item.status === 'accepted' && (
-                    <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                    <div className="flex items-center gap-1.5 text-xs text-[#3D7A58] font-mono font-medium">
                       <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Accepted for processing (202)</span>
+                      <span>Accepted</span>
                     </div>
                   )}
 
                   {item.status === 'error' && (
-                    <div className="flex items-center gap-1.5 text-destructive max-w-xs truncate" title={item.errorMessage}>
+                    <div className="flex items-center gap-1.5 text-xs text-[#B42318] font-mono">
                       <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                      <span className="truncate">{item.errorMessage}</span>
+                      <span className="max-w-[200px] truncate">{item.errorMessage}</span>
                     </div>
                   )}
 
-                  {item.status !== 'uploading' && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeQueueItem(index);
-                      }}
-                      className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-                      aria-label="Remove item"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setQueue((prev) => prev.filter((_, i) => i !== index));
+                    }}
+                    className="p-1 rounded text-[#9A958E] hover:text-[#1A1815] hover:bg-[#F5F4F0] transition-colors cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             ))}

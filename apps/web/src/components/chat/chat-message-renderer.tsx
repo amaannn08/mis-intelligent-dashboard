@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import type { Citation } from '@/components/ai/citation-list';
 
 interface ChatMessageRendererProps {
@@ -10,315 +11,164 @@ interface ChatMessageRendererProps {
   onCitationClick?: (citation: Citation) => void;
 }
 
-/**
- * Render inline text formatting (bold, inline code, calculated tags, and clickable citations).
- */
-function renderInlineFormatting(
-  text: string,
-  citations: Citation[] = [],
-  onCitationClick?: (citation: Citation) => void
-): React.ReactNode[] {
-  // Regex to match:
-  // 1. Bold: \*\*(.+?)\*\*
-  // 2. Inline code: `([^`]+)`
-  // 3. Calculated tag: \[CALCULATED:\s*([^\]]+)\]
-  // 4. Citation tag: \[(\d+)\]
-  const tokenRegex = /(\*\*[^*]+\*\*|`[^`]+`|\[CALCULATED:[^\]]+\]|\[\d+\])/g;
-
-  const parts = text.split(tokenRegex);
-
-  return parts.map((part, idx) => {
-    if (!part) return null;
-
-    // Bold: **text**
-    if (part.startsWith('**') && part.endsWith('**') && part.length >= 4) {
-      const inner = part.slice(2, -2);
-      return (
-        <strong key={idx} className="font-semibold text-foreground">
-          {inner}
-        </strong>
-      );
-    }
-
-    // Inline code: `code`
-    if (part.startsWith('`') && part.endsWith('`') && part.length >= 2) {
-      const inner = part.slice(1, -1);
-      return (
-        <code
-          key={idx}
-          className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-muted text-foreground border border-border/70"
-        >
-          {inner}
-        </code>
-      );
-    }
-
-    // Calculated tag: [CALCULATED: ...]
-    if (part.startsWith('[CALCULATED:') && part.endsWith(']')) {
-      const inner = part.slice(1, -1);
-      return (
-        <span
-          key={idx}
-          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 mx-1"
-        >
-          {inner}
-        </span>
-      );
-    }
-
-    // Citation tag: [n]
-    const citationMatch = part.match(/^\[(\d+)\]$/);
-    if (citationMatch) {
-      const num = parseInt(citationMatch[1], 10);
-      const matchedCitation = citations.find((c) => c.index === num) || citations[num - 1];
-
-      return (
-        <button
-          key={idx}
-          type="button"
-          onClick={() => {
-            if (matchedCitation && onCitationClick) {
-              onCitationClick(matchedCitation);
-            }
-          }}
-          className="inline-flex items-center justify-center font-mono text-[10px] px-1.5 py-0.2 mx-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 border border-primary/30 transition-colors cursor-pointer font-semibold align-baseline"
-          title={
-            matchedCitation
-              ? `${matchedCitation.filename || 'MIS filing'} (chunk #${matchedCitation.chunkIndex})`
-              : `Citation [${num}]`
-          }
-        >
-          [{num}]
-        </button>
-      );
-    }
-
-    // Plain text
-    return <React.Fragment key={idx}>{part}</React.Fragment>;
-  });
-}
-
-/**
- * Parses markdown table text into 2D array of headers and rows.
- */
-function parseMarkdownTable(lines: string[]): {
-  headers: string[];
-  rows: string[][];
-} | null {
-  if (lines.length < 2) return null;
-
-  const parseRow = (line: string): string[] => {
-    const trimmed = line.trim();
-    const inner = trimmed.startsWith('|') ? trimmed.slice(1) : trimmed;
-    const clean = inner.endsWith('|') ? inner.slice(0, -1) : inner;
-    return clean.split('|').map((c) => c.trim());
-  };
-
-  const isSeparator = (line: string): boolean => {
-    return /^\|?(\s*:?-+:?\s*\|?)+$/.test(line.trim());
-  };
-
-  const firstRow = parseRow(lines[0]);
-  let separatorIdx = 1;
-
-  if (isSeparator(lines[1])) {
-    separatorIdx = 1;
-  } else if (lines.length > 2 && isSeparator(lines[2])) {
-    separatorIdx = 2;
-  } else {
-    // Not a valid standard markdown table
-    return null;
-  }
-
-  const headers = firstRow;
-  const rows = lines
-    .slice(separatorIdx + 1)
-    .filter((l) => l.trim().length > 0 && !isSeparator(l))
-    .map(parseRow);
-
-  return { headers, rows };
-}
-
-export function ChatMessageRenderer({
+export const ChatMessageRenderer = React.memo(function ChatMessageRenderer({
   content,
   isStreaming = false,
   citations = [],
   onCitationClick,
 }: ChatMessageRendererProps) {
-  if (!content && isStreaming) {
-    return null;
-  }
+  // Preprocess text: turn standalone [n] into markdown links [#cite-n] so ReactMarkdown renders them via custom `a` component
+  const preprocessed = React.useMemo(() => {
+    if (!content) return '';
+    // 1. Replace [CALCULATED: reason] with `CALCULATED: reason`
+    let res = content.replace(/\[CALCULATED:\s*([^\]]+)\]/g, '`calc: $1`');
 
-  if (!content) {
-    return null;
-  }
+    // 2. Replace [n] with [[n]](#cite-n)
+    res = res.replace(/(?<!\[)\[(\d+)\](?!\()/g, '[[#cite-$1]](#cite-$1)');
 
-  // Split lines
-  const lines = content.split('\n');
-  const elements: React.ReactNode[] = [];
-  let i = 0;
+    return res;
+  }, [content]);
 
-  while (i < lines.length) {
-    const line = lines[i];
-    const trimmed = line.trim();
-
-    // 1. Check for table block (lines starting with '|')
-    if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
-      const tableLines: string[] = [];
-      while (i < lines.length && lines[i].trim().startsWith('|')) {
-        tableLines.push(lines[i]);
-        i++;
-      }
-
-      const tableData = parseMarkdownTable(tableLines);
-      if (tableData) {
-        elements.push(
-          <div key={`table-${i}`} className="my-3 overflow-x-auto rounded-lg border border-border">
-            <table className="w-full text-xs text-left">
-              <thead className="bg-muted/60 text-muted-foreground uppercase text-[10px] font-semibold border-b border-border">
-                <tr>
-                  {tableData.headers.map((h, hIdx) => (
-                    <th key={hIdx} className="px-3 py-2 font-medium">
-                      {renderInlineFormatting(h, citations, onCitationClick)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border bg-card/40">
-                {tableData.rows.map((row, rIdx) => (
-                  <tr key={rIdx} className="hover:bg-muted/30 transition-colors">
-                    {row.map((cell, cIdx) => (
-                      <td key={cIdx} className="px-3 py-2 text-foreground">
-                        {renderInlineFormatting(cell, citations, onCitationClick)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        );
-        continue;
-      } else {
-        // Fall back to plain lines
-        tableLines.forEach((tl, tIdx) => {
-          elements.push(
-            <div key={`tl-${i}-${tIdx}`} className="leading-relaxed">
-              {renderInlineFormatting(tl, citations, onCitationClick)}
-            </div>
-          );
-        });
-        continue;
-      }
-    }
-
-    // 2. Check for fenced code block ```
-    if (trimmed.startsWith('```')) {
-      const codeLines: string[] = [];
-      i++; // skip opening ```
-      while (i < lines.length && !lines[i].trim().startsWith('```')) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      if (i < lines.length) i++; // skip closing ```
-
-      elements.push(
-        <pre
-          key={`code-${i}`}
-          className="my-2.5 p-3 rounded-lg bg-muted/70 text-foreground font-mono text-xs overflow-x-auto border border-border"
-        >
-          {codeLines.join('\n')}
-        </pre>
-      );
-      continue;
-    }
-
-    // 3. Headings (#, ##, ###)
-    if (trimmed.startsWith('### ')) {
-      elements.push(
-        <h4 key={`h3-${i}`} className="text-sm font-semibold text-foreground mt-3 mb-1">
-          {renderInlineFormatting(trimmed.slice(4), citations, onCitationClick)}
-        </h4>
-      );
-      i++;
-      continue;
-    }
-    if (trimmed.startsWith('## ')) {
-      elements.push(
-        <h3 key={`h2-${i}`} className="text-sm font-bold text-foreground mt-3.5 mb-1.5">
-          {renderInlineFormatting(trimmed.slice(3), citations, onCitationClick)}
+  const components: Components = React.useMemo(() => {
+    return {
+      p: ({ children }) => (
+        <p className="text-[13px] leading-relaxed [&:not(:last-child)]:mb-2 text-[#1A1815] dark:text-[#FAFAF8]">
+          {children}
+        </p>
+      ),
+      h1: ({ children }) => (
+        <h1 className="mb-2 mt-3 text-[15px] font-bold text-[#1A1815] dark:text-[#FAFAF8]">
+          {children}
+        </h1>
+      ),
+      h2: ({ children }) => (
+        <h2 className="mb-1.5 mt-3 text-[14px] font-bold text-[#1A1815] dark:text-[#FAFAF8]">
+          {children}
+        </h2>
+      ),
+      h3: ({ children }) => (
+        <h3 className="mb-1 mt-2 text-[13px] font-semibold text-[#1A1815] dark:text-[#FAFAF8]">
+          {children}
         </h3>
-      );
-      i++;
-      continue;
-    }
-
-    // 4. Bullet lists (- or *)
-    if (/^[-*]\s+/.test(trimmed)) {
-      const listItems: string[] = [];
-      while (i < lines.length && /^[-*]\s+/.test(lines[i].trim())) {
-        listItems.push(lines[i].trim().replace(/^[-*]\s+/, ''));
-        i++;
-      }
-      elements.push(
-        <ul key={`ul-${i}`} className="my-2 space-y-1 list-disc list-inside text-sm text-foreground">
-          {listItems.map((item, lIdx) => (
-            <li key={lIdx} className="leading-relaxed">
-              {renderInlineFormatting(item, citations, onCitationClick)}
-            </li>
-          ))}
+      ),
+      ul: ({ children }) => (
+        <ul className="my-2 list-disc list-inside space-y-1 text-[13px] leading-relaxed text-[#1A1815] dark:text-[#FAFAF8]">
+          {children}
         </ul>
-      );
-      continue;
-    }
-
-    // 5. Numbered lists (1. , 2. )
-    if (/^\d+\.\s+/.test(trimmed)) {
-      const listItems: string[] = [];
-      while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
-        listItems.push(lines[i].trim().replace(/^\d+\.\s+/, ''));
-        i++;
-      }
-      elements.push(
-        <ol
-          key={`ol-${i}`}
-          className="my-2 space-y-1 list-decimal list-inside text-sm text-foreground"
-        >
-          {listItems.map((item, lIdx) => (
-            <li key={lIdx} className="leading-relaxed">
-              {renderInlineFormatting(item, citations, onCitationClick)}
-            </li>
-          ))}
+      ),
+      ol: ({ children }) => (
+        <ol className="my-2 list-decimal list-inside space-y-1 text-[13px] leading-relaxed text-[#1A1815] dark:text-[#FAFAF8]">
+          {children}
         </ol>
-      );
-      continue;
-    }
+      ),
+      li: ({ children }) => (
+        <li className="text-[13px] leading-relaxed text-[#1A1815] dark:text-[#FAFAF8]">{children}</li>
+      ),
+      blockquote: ({ children }) => (
+        <blockquote className="my-2 border-l-2 border-[#FF7102] pl-3 text-[13px] italic text-[#5A5650] dark:text-[#9A958E]">
+          {children}
+        </blockquote>
+      ),
+      hr: () => <hr className="my-3 border-[#E8E5DE] dark:border-[#2E2A24]" />,
+      strong: ({ children }) => (
+        <strong className="font-semibold text-[#1A1815] dark:text-[#FAFAF8]">{children}</strong>
+      ),
+      em: ({ children }) => <em className="italic">{children}</em>,
+      a: ({ href, children }) => {
+        if (href && href.startsWith('#cite-')) {
+          const num = parseInt(href.replace('#cite-', ''), 10);
+          const matchedCitation =
+            citations.find((c) => c.index === num) || citations[num - 1];
 
-    // 6. Empty line -> spacer
-    if (trimmed === '') {
-      elements.push(<div key={`blank-${i}`} className="h-2" />);
-      i++;
-      continue;
-    }
+          return (
+            <button
+              type="button"
+              onClick={() => {
+                if (matchedCitation && onCitationClick) {
+                  onCitationClick(matchedCitation);
+                }
+              }}
+              className="inline-flex items-center justify-center font-mono text-[10px] px-1.5 py-0.2 mx-0.5 rounded bg-[#FFEFE2] dark:bg-[#362215] text-[#FF7102] dark:text-[#FFA057] hover:bg-[#FFD0AB] border border-[#FFD0AB] dark:border-[#FF7102]/40 transition-colors cursor-pointer font-semibold align-baseline"
+              title={
+                matchedCitation
+                  ? `${matchedCitation.filename || 'MIS filing'} (chunk #${matchedCitation.chunkIndex})`
+                  : `Citation [${num}]`
+              }
+            >
+              [{num}]
+            </button>
+          );
+        }
 
-    // 7. Regular paragraph line
-    elements.push(
-      <p key={`p-${i}`} className="leading-relaxed text-sm text-foreground">
-        {renderInlineFormatting(line, citations, onCitationClick)}
-      </p>
-    );
-    i++;
+        return (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#FF7102] underline hover:opacity-80 font-medium"
+          >
+            {children}
+          </a>
+        );
+      },
+      code: ({ className, children, ...props }) => {
+        const text = String(children);
+        if (text.startsWith('calc: ')) {
+          return (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-[#E8EEF7] dark:bg-[#1A2636] text-[#3A5F8C] dark:text-[#7EA5D9] border border-[#E8EEF7] dark:border-[#2E2A24] mx-1">
+              {text.replace('calc: ', 'CALCULATED: ')}
+            </span>
+          );
+        }
+
+        // Standard inline detection: no newline in text and no language class
+        const isBlock = className?.includes('language-') || text.includes('\n');
+
+        return !isBlock ? (
+          <code {...props} className="rounded bg-[#F5F4F0] dark:bg-[#26231F] px-1 py-0.5 font-mono text-[11px] text-[#FF7102] border border-[#E8E5DE] dark:border-[#2E2A24]">
+            {children}
+          </code>
+        ) : (
+          <code {...props} className="block w-full font-mono text-[11px] text-[#1A1815] dark:text-[#FAFAF8]">
+            {children}
+          </code>
+        );
+      },
+      pre: ({ children }) => (
+        <pre className="my-2 overflow-x-auto rounded-xl bg-[#FAFAF8] dark:bg-[#141210] border border-[#E8E5DE] dark:border-[#2E2A24] px-4 py-3 text-[11px] text-[#1A1815] dark:text-[#FAFAF8] font-mono">
+          {children}
+        </pre>
+      ),
+      table: ({ children }) => (
+        <div className="my-2.5 overflow-x-auto rounded-xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] shadow-xs">
+          <table className="min-w-full border-collapse text-[12px]">{children}</table>
+        </div>
+      ),
+      thead: ({ children }) => (
+        <thead className="bg-[#FAFAF8] dark:bg-[#141210] text-[10px] uppercase font-mono tracking-[0.22em] text-[#C8C3BB] border-b border-[#E8E5DE] dark:border-[#2E2A24]">
+          {children}
+        </thead>
+      ),
+      tbody: ({ children }) => <tbody className="divide-y divide-[#E8E5DE] dark:divide-[#2E2A24]">{children}</tbody>,
+      tr: ({ children }) => <tr className="hover:bg-[#F5F4F0] dark:hover:bg-[#26231F] transition-colors">{children}</tr>,
+      th: ({ children }) => <th className="px-3.5 py-2.5 text-left font-semibold">{children}</th>,
+      td: ({ children }) => <td className="px-3.5 py-2.5 text-[#5A5650] dark:text-[#C8C3BB] font-mono text-[11px]">{children}</td>,
+    };
+  }, [citations, onCitationClick]);
+
+  if (!content && !isStreaming) {
+    return null;
   }
 
   return (
-    <div className="space-y-1 font-sans text-sm">
-      {elements}
+    <div className="space-y-1 font-sans text-[13px]">
+      <ReactMarkdown components={components}>{preprocessed}</ReactMarkdown>
       {isStreaming && (
         <span
-          className="inline-block w-1.5 h-4 ml-1 align-middle bg-primary animate-pulse"
+          className="inline-block w-1.5 h-4 ml-1 align-middle bg-[#FF7102] animate-pulse rounded-xs"
           aria-hidden="true"
         />
       )}
     </div>
   );
-}
+});

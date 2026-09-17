@@ -5,7 +5,7 @@ import { eq, desc } from 'drizzle-orm';
 import { AppShell } from '@/components/layout/app-shell';
 import { CompanyDocumentsView, type DocumentRow } from '@/components/documents/company-documents-view';
 
-export const dynamic = 'force-dynamic';
+export const revalidate = 60;
 
 interface PageProps {
   params: Promise<{ slug: string }>;

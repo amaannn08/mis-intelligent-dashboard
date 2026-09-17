@@ -2,13 +2,10 @@
 
 import * as React from 'react';
 import type { ChatSessionSummary } from './chat-types';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { cn } from '@/lib/utils';
 import {
   Plus,
-  MessageSquare,
   Edit2,
   Trash2,
   Check,
@@ -16,6 +13,7 @@ import {
   PanelLeftClose,
   Calendar,
 } from 'lucide-react';
+import { formatRelativeTime, groupSessions } from './chat-helpers';
 
 interface ChatSidebarProps {
   sessions: ChatSessionSummary[];
@@ -30,8 +28,6 @@ interface ChatSidebarProps {
   onCloseMobile: () => void;
   className?: string;
 }
-
-import { formatRelativeTime, groupSessions } from './chat-helpers';
 
 export function ChatSidebar({
   sessions,
@@ -105,7 +101,7 @@ export function ChatSidebar({
 
     return (
       <div className="space-y-1">
-        <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+        <div className="px-3 py-1 text-[10px] font-medium uppercase tracking-[0.22em] text-[#C8C3BB] font-mono flex items-center gap-1.5">
           <Calendar className="w-3 h-3 opacity-60" />
           <span>{title}</span>
         </div>
@@ -124,10 +120,10 @@ export function ChatSidebar({
                 }
               }}
               className={cn(
-                'group relative flex flex-col gap-1 p-2.5 rounded-lg text-left transition-colors cursor-pointer select-none border',
+                'group relative flex flex-col gap-1 p-2.5 rounded-xl text-left transition-colors cursor-pointer select-none border',
                 isActive
-                  ? 'bg-primary/10 border-primary/20 text-foreground font-medium shadow-2xs'
-                  : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                  ? 'bg-[#FFEFE2] dark:bg-[#2D1F16] border-[#FFD0AB] dark:border-[#FF7102]/40 text-[#1A1815] dark:text-[#FAFAF8] shadow-xs'
+                  : 'border-transparent text-[#5A5650] dark:text-[#9A958E] hover:text-[#1A1815] dark:hover:text-[#FAFAF8] hover:bg-[#F5F4F0] dark:hover:bg-[#26231F]'
               )}
             >
               {/* Row Top: Title (or input if editing) and Hover Actions */}
@@ -146,12 +142,12 @@ export function ChatSidebar({
                       onKeyDown={(e) => {
                         if (e.key === 'Escape') setEditingId(null);
                       }}
-                      className="w-full bg-background border border-ring text-xs text-foreground px-1.5 py-0.5 rounded focus:outline-none"
+                      className="w-full bg-white dark:bg-[#1C1A17] border border-[#FF7102] text-xs text-[#1A1815] dark:text-[#FAFAF8] px-2 py-0.5 rounded-lg focus:outline-none font-sans"
                     />
                     <button
                       type="submit"
                       aria-label="Save title"
-                      className="p-1 text-primary hover:bg-muted rounded cursor-pointer"
+                      className="p-1 text-[#FF7102] hover:bg-[#F5F4F0] rounded cursor-pointer"
                     >
                       <Check className="w-3.5 h-3.5" />
                     </button>
@@ -159,14 +155,14 @@ export function ChatSidebar({
                       type="button"
                       aria-label="Cancel renaming"
                       onClick={handleCancelRename}
-                      className="p-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded cursor-pointer"
+                      className="p-1 text-[#9A958E] hover:text-[#1A1815] hover:bg-[#F5F4F0] rounded cursor-pointer"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
                   </form>
                 ) : (
                   <>
-                    <span className="text-xs font-medium text-foreground truncate block flex-1">
+                    <span className="text-xs font-semibold text-[#1A1815] dark:text-[#FAFAF8] truncate block flex-1">
                       {session.title || 'New chat'}
                     </span>
 
@@ -176,7 +172,7 @@ export function ChatSidebar({
                         type="button"
                         aria-label={`Rename session ${session.title}`}
                         onClick={(e) => handleStartRename(e, session)}
-                        className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-card transition-colors cursor-pointer"
+                        className="p-1 rounded text-[#9A958E] hover:text-[#1A1815] hover:bg-white dark:hover:bg-[#1C1A17] transition-colors cursor-pointer"
                         title="Rename conversation"
                       >
                         <Edit2 className="w-3 h-3" />
@@ -185,7 +181,7 @@ export function ChatSidebar({
                         type="button"
                         aria-label={`Delete session ${session.title}`}
                         onClick={(e) => handleDeleteClick(e, session)}
-                        className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-card transition-colors cursor-pointer"
+                        className="p-1 rounded text-[#9A958E] hover:text-[#B42318] hover:bg-white dark:hover:bg-[#1C1A17] transition-colors cursor-pointer"
                         title="Delete conversation"
                       >
                         <Trash2 className="w-3 h-3" />
@@ -196,14 +192,18 @@ export function ChatSidebar({
               </div>
 
               {/* Row Bottom: Scope badge and Relative time */}
-              <div className="flex items-center justify-between text-[10px] text-muted-foreground gap-2 pt-0.5">
-                <Badge
-                  variant={session.companyName ? 'secondary' : 'outline'}
-                  className="text-[9px] px-1.5 py-0 h-4 font-normal truncate max-w-[150px]"
+              <div className="flex items-center justify-between text-[10px] text-[#9A958E] gap-2 pt-0.5">
+                <span
+                  className={cn(
+                    'text-[9px] px-1.5 py-0.5 rounded-[4px] font-mono uppercase tracking-[0.06em] truncate max-w-[140px]',
+                    session.companyName
+                      ? 'bg-[#E8EEF7] dark:bg-[#1A2636] text-[#3A5F8C] dark:text-[#7EA5D9]'
+                      : 'bg-[#EEECE7] dark:bg-[#26231F] text-[#5A5650] dark:text-[#9A958E]'
+                  )}
                 >
-                  {session.companyName || 'All portfolio'}
-                </Badge>
-                <span className="font-mono shrink-0">{formatRelativeTime(session.updatedAt)}</span>
+                  {session.companyName || 'Portfolio'}
+                </span>
+                <span className="font-mono shrink-0 text-[10px]">{formatRelativeTime(session.updatedAt)}</span>
               </div>
             </div>
           );
@@ -213,67 +213,44 @@ export function ChatSidebar({
   };
 
   const sidebarContent = (
-    <div className="flex flex-col h-full bg-card/60 backdrop-blur-md">
+    <div className="flex flex-col h-full bg-white dark:bg-[#1C1A17]">
       {/* Header with New Chat & Collapse Toggle */}
-      <div className="p-3 border-b border-border space-y-2">
+      <div className="p-3 border-b border-[#E8E5DE] dark:border-[#2E2A24] space-y-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <MessageSquare className="w-4 h-4 text-primary" />
-            <span className="text-xs font-semibold text-foreground uppercase tracking-wider">
-              Conversations
+            <span className="h-6 w-6 rounded-[6px] bg-[#FFD0AB] dark:bg-[#2D1F16] text-[#FF7102] flex items-center justify-center font-mono font-bold text-[11px]">
+              AI
+            </span>
+            <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[#1A1815] dark:text-[#FAFAF8] font-mono">
+              Sessions
             </span>
           </div>
-
-          <div className="flex items-center gap-1">
-            {/* Desktop collapse toggle */}
-            <button
-              type="button"
-              onClick={onToggleCollapse}
-              aria-label="Collapse conversations sidebar"
-              className="hidden md:flex p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
-              title="Collapse sidebar"
-            >
-              <PanelLeftClose className="w-3.5 h-3.5" />
-            </button>
-
-            {/* Mobile close button */}
-            <button
-              type="button"
-              onClick={onCloseMobile}
-              aria-label="Close conversations drawer"
-              className="md:hidden p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            aria-label="Collapse conversations sidebar"
+            className="hidden md:flex p-1.5 rounded-lg text-[#9A958E] hover:text-[#1A1815] hover:bg-[#F5F4F0] dark:hover:bg-[#26231F] transition-colors cursor-pointer"
+            title="Collapse sidebar"
+          >
+            <PanelLeftClose className="w-4 h-4" />
+          </button>
         </div>
 
-        {/* New Chat Button */}
-        <Button
+        <button
           type="button"
-          onClick={() => {
-            onNewChat();
-            onCloseMobile();
-          }}
-          size="sm"
-          className="w-full justify-center gap-1.5 text-xs h-8 shadow-2xs font-medium"
+          onClick={onNewChat}
+          className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#FF7102] hover:bg-[#ff8a3a] text-white py-2 text-xs font-semibold shadow-[0_4px_14px_rgba(255,113,2,0.25)] transition-all cursor-pointer"
         >
           <Plus className="w-3.5 h-3.5" />
-          <span>New chat</span>
-        </Button>
+          <span>New Chat</span>
+        </button>
       </div>
 
-      {/* Session list area */}
+      {/* Sessions List grouped by date */}
       <div className="flex-1 overflow-y-auto p-2 space-y-4">
         {sessions.length === 0 ? (
-          <div className="py-12 px-4 text-center space-y-2">
-            <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center mx-auto text-muted-foreground">
-              <MessageSquare className="w-4 h-4" />
-            </div>
-            <div className="text-xs font-medium text-foreground">No conversations yet</div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Start a new chat to ask questions across your portfolio MIS database.
-            </p>
+          <div className="p-4 text-center text-xs text-[#9A958E] font-mono italic">
+            No past conversations. Click &quot;New Chat&quot; to begin.
           </div>
         ) : (
           <>
@@ -284,20 +261,14 @@ export function ChatSidebar({
         )}
       </div>
 
-      {/* Footer info */}
-      <div className="p-3 border-t border-border/80 text-[11px] text-muted-foreground flex items-center justify-between bg-muted/20">
-        <span>{sessions.length} session{sessions.length === 1 ? '' : 's'}</span>
-        <span className="font-mono text-[10px]">MIS DB v1</span>
-      </div>
-
-      {/* Delete Confirmation Dialog */}
+      {/* Delete Confirmation Modal */}
       <ConfirmDialog
         isOpen={Boolean(sessionToDelete)}
         onClose={() => setSessionToDelete(null)}
         onConfirm={handleConfirmDelete}
         title="Delete Conversation"
-        description={`Are you sure you want to permanently delete "${sessionToDelete?.title}"? All messages and conversation history will be removed.`}
-        confirmLabel="Delete Conversation"
+        description={`Are you sure you want to delete "${sessionToDelete?.title}"? All messages and citations in this session will be permanently removed.`}
+        confirmLabel="Delete"
         variant="destructive"
         isLoading={isDeleting}
       />
@@ -306,31 +277,37 @@ export function ChatSidebar({
 
   return (
     <>
-      {/* Desktop Rail (280px or collapsed) */}
+      {/* Desktop Sidebar Rail */}
       <aside
         className={cn(
-          'hidden md:flex flex-col border-r border-border h-full shrink-0 transition-all duration-200 overflow-hidden',
-          isCollapsed ? 'w-0 border-r-0' : 'w-[280px]',
+          'hidden md:flex flex-col border-r border-[#E8E5DE] dark:border-[#2E2A24] h-full shrink-0 transition-all duration-300 ease-in-out',
+          isCollapsed ? 'w-0 overflow-hidden border-none opacity-0' : 'w-64 opacity-100',
           className
         )}
       >
-        {!isCollapsed && sidebarContent}
+        {sidebarContent}
       </aside>
 
-      {/* Mobile Slide-over Drawer */}
+      {/* Mobile Drawer (Overlay) */}
       {isMobileOpen && (
-        <div className="md:hidden fixed inset-0 z-50 overflow-hidden" role="dialog" aria-modal="true">
-          {/* Backdrop */}
+        <div className="md:hidden fixed inset-0 z-50 flex" role="dialog" aria-modal="true">
           <div
-            className="fixed inset-0 bg-background/80 backdrop-blur-xs transition-opacity animate-in fade-in"
+            className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity"
             onClick={onCloseMobile}
             aria-hidden="true"
           />
-
-          <div className="fixed inset-y-0 left-0 max-w-full flex">
-            <div className="w-72 bg-card border-r border-border shadow-2xl flex flex-col animate-in slide-in-from-left duration-200">
-              {sidebarContent}
+          <div className="relative flex-1 flex flex-col max-w-xs w-full bg-white dark:bg-[#1C1A17] shadow-xl animate-in slide-in-from-left duration-200">
+            <div className="absolute top-2 right-2 z-10">
+              <button
+                type="button"
+                onClick={onCloseMobile}
+                aria-label="Close conversation drawer"
+                className="p-1.5 rounded-lg text-[#9A958E] hover:text-[#1A1815] hover:bg-[#F5F4F0]"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
+            {sidebarContent}
           </div>
         </div>
       )}

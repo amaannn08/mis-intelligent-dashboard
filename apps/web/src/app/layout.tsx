@@ -1,15 +1,22 @@
 import type { Metadata } from 'next';
-import { Inter, JetBrains_Mono } from 'next/font/google';
+import { Syne, Playfair_Display, DM_Mono } from 'next/font/google';
 import './globals.css';
 import { ThemeProvider } from '@/components/theme-provider';
 
-const inter = Inter({
+const syne = Syne({
   subsets: ['latin'],
   display: 'swap',
   variable: '--font-sans',
 });
 
-const mono = JetBrains_Mono({
+const playfair = Playfair_Display({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-serif',
+});
+
+const dmMono = DM_Mono({
+  weight: ['300', '400', '500'],
   subsets: ['latin'],
   display: 'swap',
   variable: '--font-mono',
@@ -26,9 +33,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${inter.variable} ${mono.variable}`}>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${syne.variable} ${playfair.variable} ${dmMono.variable}`}
+    >
       <body className="antialiased min-h-screen bg-background text-foreground selection:bg-primary/10">
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="light"
+          enableSystem
+          disableTransitionOnChange
+        >
           {children}
         </ThemeProvider>
       </body>

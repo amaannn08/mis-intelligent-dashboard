@@ -6,7 +6,7 @@ import { AppShell } from '@/components/layout/app-shell';
 import { CompanyWorkspace } from '@/components/company/company-workspace';
 import { type MetricRowData } from '@/components/dashboard/metric-table';
 
-export const dynamic = 'force-dynamic';
+export const revalidate = 60;
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -25,40 +25,41 @@ export default async function CompanyWorkspacePage({ params }: PageProps) {
     notFound();
   }
 
-  // 2. Fetch documents for this company
-  const compDocs = await db
-    .select({
-      id: documents.id,
-      filename: documents.filename,
-      reportingPeriod: documents.reportingPeriod,
-      status: documents.status,
-      sizeBytes: documents.sizeBytes,
-      uploadedAt: documents.uploadedAt,
-      error: documents.error,
-    })
-    .from(documents)
-    .where(eq(documents.companyId, company.id))
-    .orderBy(desc(documents.uploadedAt));
+  // 2. Performance Fix 1: Batch independent document & metric queries in parallel
+  const [compDocs, compMetrics] = await Promise.all([
+    db
+      .select({
+        id: documents.id,
+        filename: documents.filename,
+        reportingPeriod: documents.reportingPeriod,
+        status: documents.status,
+        sizeBytes: documents.sizeBytes,
+        uploadedAt: documents.uploadedAt,
+        error: documents.error,
+      })
+      .from(documents)
+      .where(eq(documents.companyId, company.id))
+      .orderBy(desc(documents.uploadedAt)),
 
-  // 3. Fetch metrics for this company
-  const compMetrics = await db
-    .select({
-      id: metrics.id,
-      metricKey: metrics.metricKey,
-      value: metrics.value,
-      unit: metrics.unit,
-      reportingPeriod: metrics.reportingPeriod,
-      valueKind: metrics.valueKind,
-      sourceReference: metrics.sourceReference,
-      confidence: metrics.confidence,
-      label: metricDefinitions.label,
-      directionality: metricDefinitions.directionality,
-      documentId: metrics.documentId,
-    })
-    .from(metrics)
-    .leftJoin(metricDefinitions, eq(metrics.metricKey, metricDefinitions.key))
-    .where(eq(metrics.companyId, company.id))
-    .orderBy(asc(metrics.reportingPeriod));
+    db
+      .select({
+        id: metrics.id,
+        metricKey: metrics.metricKey,
+        value: metrics.value,
+        unit: metrics.unit,
+        reportingPeriod: metrics.reportingPeriod,
+        valueKind: metrics.valueKind,
+        sourceReference: metrics.sourceReference,
+        confidence: metrics.confidence,
+        label: metricDefinitions.label,
+        directionality: metricDefinitions.directionality,
+        documentId: metrics.documentId,
+      })
+      .from(metrics)
+      .leftJoin(metricDefinitions, eq(metrics.metricKey, metricDefinitions.key))
+      .where(eq(metrics.companyId, company.id))
+      .orderBy(asc(metrics.reportingPeriod)),
+  ]);
 
   const formattedMetrics: MetricRowData[] = compMetrics.map((m) => ({
     id: m.id,

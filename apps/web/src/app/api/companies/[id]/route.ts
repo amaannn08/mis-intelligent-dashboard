@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { apiError, apiSuccess, handleZodError } from '@/lib/api-response';
 import {
@@ -58,6 +59,14 @@ export async function PATCH(
     if (!updated) {
       return apiError('NOT_FOUND', `Company with identifier '${id}' not found.`, 404);
     }
+    try {
+      revalidatePath('/');
+      revalidatePath('/companies');
+      revalidatePath('/companies/[slug]', 'page');
+      revalidatePath('/chat');
+    } catch (e) {
+      console.error('Failed to revalidate paths after updating company:', e);
+    }
     return apiSuccess(updated, 200);
   } catch (err: unknown) {
     console.error(`Failed to update company ${id}:`, err);
@@ -86,6 +95,14 @@ export async function DELETE(
     const result = await deleteCompany(id, isHard);
     if (!result) {
       return apiError('NOT_FOUND', `Company with identifier '${id}' not found.`, 404);
+    }
+    try {
+      revalidatePath('/');
+      revalidatePath('/companies');
+      revalidatePath('/companies/[slug]', 'page');
+      revalidatePath('/chat');
+    } catch (e) {
+      console.error('Failed to revalidate paths after deleting company:', e);
     }
     return apiSuccess(result, 200);
   } catch (err: unknown) {

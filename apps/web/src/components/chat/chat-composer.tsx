@@ -1,7 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import { Button } from '@/components/ui/button';
 import { Send, Square, Sparkles, Building2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -29,7 +28,7 @@ export function ChatComposer({
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    const newHeight = Math.min(160, Math.max(42, el.scrollHeight));
+    const newHeight = Math.min(160, Math.max(44, el.scrollHeight));
     el.style.height = `${newHeight}px`;
   }, []);
 
@@ -43,7 +42,7 @@ export function ChatComposer({
     onSendMessage(trimmed);
     setText('');
     if (textareaRef.current) {
-      textareaRef.current.style.height = '42px';
+      textareaRef.current.style.height = '44px';
       textareaRef.current.focus();
     }
   };
@@ -56,38 +55,38 @@ export function ChatComposer({
   };
 
   const defaultPlaceholder = scopeCompanyName
-    ? `Ask anything about ${scopeCompanyName} (revenue, margins, burn, filings)…`
-    : 'Ask anything across portfolio MIS filings or compare metrics…';
+    ? `Ask anything about ${scopeCompanyName} (revenue, burn, runway, filings)…`
+    : 'Ask anything across portfolio MIS filings or compare companies…';
 
   return (
-    <div className={cn('p-3 sm:p-4 bg-card/90 backdrop-blur-md border-t border-border space-y-2', className)}>
+    <div className={cn('p-3 sm:p-4 bg-[#FAFAF8] dark:bg-[#141210] border-t border-[#E8E5DE] dark:border-[#2E2A24] space-y-2', className)}>
       {/* Active Scope Hint Pill */}
-      <div className="flex items-center justify-between px-1 text-[11px] text-muted-foreground">
-        <div className="flex items-center gap-1.5 font-medium">
+      <div className="flex items-center justify-between px-2 text-[10px] font-mono tracking-[0.12em] uppercase text-[#9A958E]">
+        <div className="flex items-center gap-2">
           {scopeCompanyName ? (
             <>
-              <Building2 className="w-3 h-3 text-primary" />
+              <Building2 className="w-3 h-3 text-[#FF7102]" />
               <span>
-                Asking about: <strong className="text-foreground">{scopeCompanyName}</strong>
+                Scope: <strong className="text-[#1A1815] dark:text-[#FAFAF8]">{scopeCompanyName}</strong>
               </span>
             </>
           ) : (
             <>
-              <Sparkles className="w-3 h-3 text-primary" />
+              <Sparkles className="w-3 h-3 text-[#FF7102]" />
               <span>
-                Asking about: <strong className="text-foreground">All portfolio</strong>
+                Scope: <strong className="text-[#1A1815] dark:text-[#FAFAF8]">All Portfolio</strong>
               </span>
             </>
           )}
         </div>
 
-        <div className="hidden sm:block text-[10px] text-muted-foreground font-mono">
-          Enter to send · Shift+Enter for newline
+        <div className="hidden sm:block text-[10px] text-[#C8C3BB] font-mono">
+          Enter to send · Shift+Enter newline
         </div>
       </div>
 
-      {/* Input container */}
-      <div className="relative flex items-end gap-2 rounded-xl border border-border bg-card p-2 shadow-xs focus-within:ring-2 focus-within:ring-ring focus-within:border-transparent transition-all">
+      {/* Input card container */}
+      <div className="relative flex items-end gap-2 rounded-2xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] p-2.5 shadow-sm focus-within:border-[#FF7102] transition-colors">
         <textarea
           ref={textareaRef}
           value={text}
@@ -96,35 +95,32 @@ export function ChatComposer({
           placeholder={placeholder || defaultPlaceholder}
           rows={1}
           disabled={isStreaming}
-          className="flex-1 max-h-40 resize-none bg-transparent p-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50 font-sans leading-relaxed"
-          style={{ height: '42px' }}
+          className="flex-1 max-h-40 resize-none bg-transparent p-1.5 text-xs text-[#1A1815] dark:text-[#FAFAF8] placeholder:text-[#9A958E] focus:outline-none disabled:opacity-50 font-sans leading-relaxed"
+          style={{ height: '44px' }}
         />
 
         <div className="shrink-0 pb-0.5">
           {isStreaming ? (
-            <Button
+            <button
               type="button"
-              variant="destructive"
-              size="sm"
               onClick={onStop}
               aria-label="Stop generating response"
-              className="h-8 px-3 text-xs gap-1.5 font-medium shadow-2xs"
+              className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-[#B42318] hover:bg-[#912018] px-3 text-xs font-semibold text-white shadow-xs transition-colors cursor-pointer"
             >
-              <Square className="w-3.5 h-3.5 fill-current" />
+              <Square className="w-3 h-3 fill-current" />
               <span>Stop</span>
-            </Button>
+            </button>
           ) : (
-            <Button
+            <button
               type="button"
-              size="sm"
               onClick={handleSend}
               disabled={!text.trim() || isStreaming}
-              aria-label="Send message to portfolio analyst"
-              className="h-8 px-3 text-xs gap-1.5 font-medium shadow-2xs"
+              aria-label="Send message"
+              className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-[#FF7102] hover:bg-[#ff8a3a] disabled:opacity-40 disabled:cursor-not-allowed px-3 text-xs font-semibold text-white shadow-[0_4px_14px_rgba(255,113,2,0.25)] transition-all cursor-pointer"
             >
-              <Send className="w-3.5 h-3.5" />
+              <Send className="w-3 h-3" />
               <span>Send</span>
-            </Button>
+            </button>
           )}
         </div>
       </div>

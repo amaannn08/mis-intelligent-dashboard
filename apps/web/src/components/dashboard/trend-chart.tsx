@@ -61,18 +61,18 @@ function CustomTooltip({ active, payload, unit }: CustomTooltipProps) {
       : item.value.toLocaleString('en-IN');
 
     return (
-      <div className="rounded-lg border border-border bg-popover p-3 shadow-md text-xs space-y-1">
-        <div className="font-medium text-foreground">{formatPeriod(item.period)}</div>
-        <div className="text-sm font-bold font-mono tabular-nums text-primary">
+      <div className="rounded-xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] p-3 shadow-md text-xs space-y-1">
+        <div className="font-mono text-[11px] text-[#9A958E]">{formatPeriod(item.period)}</div>
+        <div className="text-sm font-bold font-mono tabular-nums text-[#FF7102]">
           {formattedValue}
         </div>
         {item.valueKind && (
-          <div className="text-[10px] text-muted-foreground capitalize">
+          <div className="text-[10px] text-[#9A958E] capitalize font-mono">
             Kind: {item.valueKind}
           </div>
         )}
         {item.sourceReference && (
-          <div className="text-[10px] text-muted-foreground/80 max-w-[200px] truncate">
+          <div className="text-[10px] text-[#9A958E] max-w-[220px] truncate font-mono">
             Source: {item.sourceReference}
           </div>
         )}
@@ -82,7 +82,7 @@ function CustomTooltip({ active, payload, unit }: CustomTooltipProps) {
   return null;
 }
 
-export function TrendChart({
+export const TrendChart = React.memo(function TrendChart({
   data,
   unit,
   title,
@@ -92,15 +92,31 @@ export function TrendChart({
   className,
 }: TrendChartProps) {
   const [mounted, setMounted] = React.useState(false);
+  const hasAnimatedRef = React.useRef(false);
 
   React.useEffect(() => {
     setMounted(true);
+    hasAnimatedRef.current = true;
   }, []);
+
+  // Performance Fix 6: Memoise derived chart array
+  const formattedData = React.useMemo(() => {
+    if (!data) return [];
+    return data.map((d) => ({
+      ...d,
+      formattedPeriod: formatPeriod(d.period),
+    }));
+  }, [data]);
 
   if (isLoading || !mounted) {
     return (
-      <div className={cn('w-full rounded-xl border border-border bg-card p-5 space-y-4', className)}>
-        {title && <Skeleton className="h-5 w-40" />}
+      <div
+        className={cn(
+          'w-full rounded-2xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] p-5 space-y-4 shadow-xs',
+          className
+        )}
+      >
+        {title && <Skeleton className="h-4 w-36" />}
         <Skeleton style={{ height: `${height}px` }} className="w-full" />
       </div>
     );
@@ -108,8 +124,17 @@ export function TrendChart({
 
   if (!data || data.length === 0) {
     return (
-      <div className={cn('w-full rounded-xl border border-border bg-card p-5', className)}>
-        {title && <h3 className="text-sm font-semibold mb-4 text-foreground">{title}</h3>}
+      <div
+        className={cn(
+          'w-full rounded-2xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] p-5 shadow-xs',
+          className
+        )}
+      >
+        {title && (
+          <h3 className="text-xs font-semibold uppercase tracking-[0.16em] mb-4 text-[#1A1815] dark:text-[#FAFAF8] font-mono">
+            {title}
+          </h3>
+        )}
         <EmptyState
           title="No trend data"
           description="Historical reporting periods for this metric have not been extracted yet."
@@ -137,20 +162,24 @@ export function TrendChart({
     return val.toLocaleString('en-IN');
   };
 
-  const formattedData = data.map((d) => ({
-    ...d,
-    formattedPeriod: formatPeriod(d.period),
-  }));
+  const isAnimationActive = !hasAnimatedRef.current;
 
   return (
-    <div className={cn('w-full rounded-xl border border-border bg-card p-5 shadow-2xs', className)}>
+    <div
+      className={cn(
+        'w-full rounded-2xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] p-5 shadow-xs',
+        className
+      )}
+    >
       {title && (
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <TrendingUp className="w-4 h-4 text-muted-foreground" />
-            <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+            <TrendingUp className="w-4 h-4 text-[#FF7102]" />
+            <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#1A1815] dark:text-[#FAFAF8] font-mono">
+              {title}
+            </h3>
           </div>
-          <span className="text-xs text-muted-foreground font-mono">
+          <span className="text-[11px] text-[#9A958E] font-mono">
             {data.length} {data.length === 1 ? 'period' : 'periods'}
           </span>
         </div>
@@ -160,16 +189,16 @@ export function TrendChart({
         <ResponsiveContainer width="100%" height="100%">
           {type === 'bar' ? (
             <BarChart data={formattedData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.6} />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E8E5DE" />
               <XAxis
                 dataKey="formattedPeriod"
-                stroke="var(--muted-foreground)"
+                stroke="#9A958E"
                 fontSize={11}
                 tickLine={false}
                 axisLine={false}
               />
               <YAxis
-                stroke="var(--muted-foreground)"
+                stroke="#9A958E"
                 fontSize={11}
                 tickLine={false}
                 axisLine={false}
@@ -178,29 +207,29 @@ export function TrendChart({
               <RechartsTooltip content={<CustomTooltip unit={unit} />} />
               <Bar
                 dataKey="value"
-                fill="var(--primary)"
+                fill="#FF7102"
                 radius={[4, 4, 0, 0]}
-                animationDuration={180}
+                isAnimationActive={isAnimationActive}
               />
             </BarChart>
           ) : (
             <AreaChart data={formattedData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
               <defs>
-                <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.25} />
-                  <stop offset="95%" stopColor="var(--primary)" stopOpacity={0.0} />
+                <linearGradient id="crmAreaGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#FFEFE2" stopOpacity={0.8} />
+                  <stop offset="95%" stopColor="#FFEFE2" stopOpacity={0.05} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.6} />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E8E5DE" />
               <XAxis
                 dataKey="formattedPeriod"
-                stroke="var(--muted-foreground)"
+                stroke="#9A958E"
                 fontSize={11}
                 tickLine={false}
                 axisLine={false}
               />
               <YAxis
-                stroke="var(--muted-foreground)"
+                stroke="#9A958E"
                 fontSize={11}
                 tickLine={false}
                 axisLine={false}
@@ -210,11 +239,11 @@ export function TrendChart({
               <Area
                 type="monotone"
                 dataKey="value"
-                stroke="var(--primary)"
+                stroke="#FF7102"
                 strokeWidth={2}
                 fillOpacity={1}
-                fill="url(#chartGradient)"
-                animationDuration={180}
+                fill="url(#crmAreaGradient)"
+                isAnimationActive={isAnimationActive}
               />
             </AreaChart>
           )}
@@ -222,4 +251,4 @@ export function TrendChart({
       </div>
     </div>
   );
-}
+});
