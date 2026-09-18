@@ -11,7 +11,6 @@ import { Modal } from '@/components/ui/modal';
 import {
   LayoutDashboard,
   Building2,
-  Settings,
   Search,
   Command,
   LogOut,
@@ -127,7 +126,6 @@ export function AppShell({ children, noPadding = false }: AppShellProps) {
     { href: '/', label: 'Overview', icon: LayoutDashboard },
     { href: '/companies', label: 'Companies', icon: Building2 },
     { href: '/chat', label: 'Chat', icon: MessageSquare },
-    { href: '/settings', label: 'Settings', icon: Settings },
   ];
 
   return (
@@ -492,20 +490,6 @@ export function AppShell({ children, noPadding = false }: AppShellProps) {
               <span className="text-[10px] text-[#9A958E] font-mono">/chat</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                setCommandOpen(false);
-                router.push('/settings');
-              }}
-              className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-[#F5F4F0] dark:hover:bg-[#26231F] text-left cursor-pointer transition-colors"
-            >
-              <div className="flex items-center gap-2.5">
-                <Settings className="w-3.5 h-3.5 text-[#9A958E]" />
-                <span className="font-medium text-[#1A1815] dark:text-[#FAFAF8]">Diagnostics & Settings</span>
-              </div>
-              <span className="text-[10px] text-[#9A958E] font-mono">/settings</span>
-            </button>
           </div>
         </div>
       </Modal>

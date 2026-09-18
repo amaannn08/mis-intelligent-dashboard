@@ -57,7 +57,6 @@ Measurements captured across authenticated routes on desktop (1440x900) and mobi
   - `apps/web/src/app/companies/loading.tsx` (Companies Directory)
   - `apps/web/src/app/companies/[slug]/loading.tsx` (Company Workspace)
   - `apps/web/src/app/chat/loading.tsx` (Chat Workspace)
-  - `apps/web/src/app/settings/loading.tsx` (Settings & Diagnostics)
 
 ### Bottleneck 8: Un-memoized Chart & Table Components
 - **Root Cause:** Re-rendering parent layout caused expensive Recharts SVG calculations and metric table rows to recompute.

@@ -27,7 +27,7 @@ mis-intelligent-dashboard/
 ├── .env.example               # Documented template for environment variables
 ├── apps/
 │   └── web/                   # Next.js 15 App Router (React 19, Tailwind CSS v4, shadcn/ui)
-│       ├── src/app/           # Routes: /, /chat, /companies, /companies/[slug], /settings, /login, /api/*
+│       ├── src/app/           # Routes: /, /chat, /companies, /companies/[slug], /login, /api/*
 │       ├── src/components/    # Reusable UI primitives, AppShell, Chat workspace, KPI cards, charts
 │       ├── src/lib/           # Server-only utilities (auth, companies, documents, formatters)
 │       └── src/middleware.ts  # Session authentication gating & public route whitelist
@@ -367,14 +367,12 @@ All routes and responsive breakpoints have been verified via headless Chromium w
 | **Document Center** | Desktop 1440×900 | [`docs/screenshots/05_documents_desktop.png`](docs/screenshots/05_documents_desktop.png) | Dropzone with 4.5 MB ceiling notice, filings table, status pills |
 | **Document Detail Drawer** | Desktop 1440×900 | [`docs/screenshots/06_document_drawer_desktop.png`](docs/screenshots/06_document_drawer_desktop.png) | Slide-over drawer with 4-stage job log, extracted metrics, download/delete |
 | **Streaming AI Query** | Desktop 1440×900 | [`docs/screenshots/07_query_stream_desktop.png`](docs/screenshots/07_query_stream_desktop.png) | Live streaming DeepSeek answer with clickable grounding citations |
-| **Diagnostics & Definitions** | Desktop 1440×900 | [`docs/screenshots/08_settings_desktop.png`](docs/screenshots/08_settings_desktop.png) | Database status, active AI models, canonical metric alias dictionary |
 | **Dark Mode Theme** | Desktop 1440×900 | [`docs/screenshots/09_dark_mode_desktop.png`](docs/screenshots/09_dark_mode_desktop.png) | High-contrast dark theme across UI surfaces and charts |
 | **Login (Mobile)** | Mobile 412×915 | [`docs/screenshots/10_login_mobile.png`](docs/screenshots/10_login_mobile.png) | Mobile responsive login card |
 | **Portfolio Overview (Mobile)** | Mobile 412×915 | [`docs/screenshots/11_overview_mobile.png`](docs/screenshots/11_overview_mobile.png) | Mobile stack with KPI cards and responsive charts |
 | **Company Directory (Mobile)** | Mobile 412×915 | [`docs/screenshots/12_companies_mobile.png`](docs/screenshots/12_companies_mobile.png) | Collapsed card view replacing tables on narrow viewports |
 | **Company Workspace (Mobile)** | Mobile 412×915 | [`docs/screenshots/13_company_workspace_mobile.png`](docs/screenshots/13_company_workspace_mobile.png) | Responsive mobile workspace with stacked KPIs and controls |
 | **Document Center (Mobile)** | Mobile 412×915 | [`docs/screenshots/14_documents_mobile.png`](docs/screenshots/14_documents_mobile.png) | Mobile upload queue, filing cards, and action buttons |
-| **Settings (Mobile)** | Mobile 412×915 | [`docs/screenshots/15_settings_mobile.png`](docs/screenshots/15_settings_mobile.png) | Responsive diagnostics cards on mobile |
 | **Narrow Viewport (380px)** | Mobile 380×800 | [`docs/screenshots/16_viewport_380px.png`](docs/screenshots/16_viewport_380px.png) | Verified 0 horizontal overflow (`scrollWidth <= clientWidth`) |
 
 ---

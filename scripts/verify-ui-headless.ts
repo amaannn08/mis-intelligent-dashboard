@@ -265,13 +265,6 @@ async function run() {
       console.log('📸 Captured 07_query_stream_desktop.png');
     }
 
-    // Step J: /settings
-    console.log('--> Visiting /settings');
-    await page.goto(`${BASE_URL}/settings`, { waitUntil: 'networkidle2' });
-    await page.waitForSelector('h1');
-    await page.screenshot({ path: path.join(SCREENSHOTS_DIR, '08_settings_desktop.png') });
-    console.log('📸 Captured 08_settings_desktop.png');
-
     // Step K: Dark Mode Verification
     console.log('--> Verifying Dark Mode toggle...');
     await page.evaluate(() => {
@@ -328,12 +321,6 @@ async function run() {
     await sleep(800);
     await page.screenshot({ path: path.join(SCREENSHOTS_DIR, '14_documents_mobile.png') });
     console.log('📸 Captured 14_documents_mobile.png');
-
-    // Settings Mobile
-    await page.goto(`${BASE_URL}/settings`, { waitUntil: 'networkidle2' });
-    await sleep(800);
-    await page.screenshot({ path: path.join(SCREENSHOTS_DIR, '15_settings_mobile.png') });
-    console.log('📸 Captured 15_settings_mobile.png');
 
     // ==========================================
     // 3. NARROW 380px VIEWPORT & NO HORIZONTAL SCROLL
