@@ -3,9 +3,18 @@ import type { Citation, RagAnswer } from '../types.js';
 import { embedQuery, type EmbedOptions } from '../embeddings/index.js';
 import { formatConversationHistory, type HistoryMessage } from './history.js';
 
+import type { MetricContextRow } from './structured.js';
+import {
+  buildAnalystSystemPrompt,
+  computeCoverage,
+  validateCitations,
+  getNoContextRefusal,
+} from './prompt.js';
+
 export * from './router.js';
 export * from './structured.js';
 export * from './history.js';
+export * from './prompt.js';
 
 export interface AnswerQueryOptions {
   question: string;
@@ -115,19 +124,6 @@ export function buildRAGContext(rows: RetrievedChunkRow[]): {
 
   const fullContext = contextBlocks.join('\n\n');
 
-  const systemPrompt = `You are the WEH Ventures Portfolio Intelligence Assistant. You answer questions strictly using the retrieved portfolio MIS document context below.
-
-CONTEXT:
-${fullContext}
-
-INSTRUCTIONS:
-1. ANSWER FIRST: State the direct numerical answer in the first sentence.
-2. CITATIONS: Cite sources using [1], [2] immediately following the facts they support.
-3. REPORTED VS CALCULATED:
-   - If a number is directly stated in the context, report it as stated.
-   - If you compute a metric (e.g. EBITDA margin, MoM growth, burn rate), explicitly label it [CALCULATED] and show the exact arithmetic: e.g. "Gross Margin was 42.0% [CALCULATED: (₹63L / ₹150L) * 100] [1]".
-4. REFUSAL POLICY: If the retrieved context does not contain the answer or does not have sufficient data to answer, state clearly: "I cannot find this information in the uploaded MIS reports." Never invent or extrapolate numbers.`;
-
   const allCitations: Citation[] = rows.map((row, i) => {
     const meta = row.metadata || {};
     return {
@@ -141,15 +137,23 @@ INSTRUCTIONS:
     };
   });
 
+  const coverage = computeCoverage({ documentRows: rows });
+  const systemPrompt = buildAnalystSystemPrompt({
+    documentContext: fullContext,
+    coverage,
+  });
+
   return { fullContext, systemPrompt, allCitations };
 }
 
 export interface HybridRAGContextOptions {
   structuredContext?: string;
+  structuredRows?: MetricContextRow[];
   documentRows?: RetrievedChunkRow[];
   historyMessages?: HistoryMessage[];
   detectedCompanyNames?: string[];
   scopeCompanyName?: string;
+  totalPortfolioCompanies?: number;
 }
 
 /**
@@ -221,51 +225,40 @@ export function buildHybridRAGPrompt(options: HybridRAGContextOptions): {
 } {
   const {
     structuredContext = '',
+    structuredRows = [],
     documentRows = [],
     historyMessages = [],
     detectedCompanyNames = [],
     scopeCompanyName,
+    totalPortfolioCompanies,
   } = options;
 
   const historyBlock = formatConversationHistory(historyMessages);
   const { groupedText: docBlock, allCitations } = buildGroupedDocumentContext(documentRows);
 
-  const contextParts: string[] = [];
-  if (historyBlock) {
-    contextParts.push(historyBlock);
-  }
-  if (structuredContext) {
-    contextParts.push(structuredContext);
-  }
-  if (docBlock) {
-    contextParts.push(`DOCUMENT EXCERPTS:\n\n${docBlock}`);
-  }
+  const coverage = computeCoverage({
+    structuredRows,
+    documentRows,
+    totalPortfolioCompanies,
+  });
 
-  const fullContext = contextParts.join('\n\n---\n\n');
-
-  let companyDirective = '';
-  if (detectedCompanyNames.length > 0) {
-    companyDirective = ` Explicitly state in the answer that the findings pertain to ${detectedCompanyNames.join(' and ')}.`;
-  } else if (scopeCompanyName) {
-    companyDirective = ` Explicitly state in the answer that the findings pertain to ${scopeCompanyName}.`;
-  }
-
-  const systemPrompt = `You are the WEH Ventures Portfolio Intelligence Assistant. You answer questions strictly using the retrieved portfolio MIS document context and structured metrics below.
-
-CONTEXT:
-${fullContext}
-
-INSTRUCTIONS:
-1. ANSWER FIRST: State the direct numerical answer in the first sentence.${companyDirective}
-2. CITATIONS: Cite sources using [1], [2] immediately following the facts they support. Every factual claim needs a [n] citation pointing at a real retrieved chunk or document reference.
-3. ALLOWED SOURCES & CONVERSATION HISTORY: Numbers may ONLY come from retrieved context/metrics, not from conversation history. The conversation history is provided strictly for resolving dialogue context (e.g. follow-up questions or pronouns). Never treat previous conversation messages as an allowed source of truth for financial numbers.
-4. REPORTED VS CALCULATED:
-   - If a number is directly stated in the context or structured metrics, report it as stated.
-   - If you compute a metric (e.g. EBITDA margin, MoM growth, burn rate), explicitly label it [CALCULATED] and show the exact arithmetic: e.g. "Gross Margin was 42.0% [CALCULATED: (₹63L / ₹150L) * 100] [1]".
-5. REFUSAL POLICY: If the retrieved context does not contain the answer or there is not enough data in the uploaded MIS documents to answer, state clearly: "I cannot find this information in the uploaded MIS reports." Never invent or extrapolate numbers.`;
+  const systemPrompt = buildAnalystSystemPrompt({
+    structuredContext,
+    documentContext: docBlock,
+    history: historyBlock,
+    coverage,
+    scope: detectedCompanyNames.length > 0
+      ? { detectedCompanyNames }
+      : scopeCompanyName
+        ? { companyName: scopeCompanyName }
+        : undefined,
+  });
 
   return { systemPrompt, allCitations };
 }
+
+export const buildHybridRAGContext = buildHybridRAGPrompt;
+
 
 /**
  * Extract citation markers [1], [2] from the LLM answer and map back to citations.
@@ -332,7 +325,9 @@ export async function answerQuery(
 
   if (rows.length === 0) {
     return {
-      answer: 'I cannot find this information in the uploaded MIS reports.',
+      answer: getNoContextRefusal({
+        companyName: companyId ? 'the selected company' : undefined,
+      }),
       citations: [],
       usedChunks: [],
     };
@@ -370,7 +365,8 @@ export async function answerQuery(
     choices?: Array<{ message?: { content?: string } }>;
   };
 
-  const answer = completionData.choices?.[0]?.message?.content?.trim() || '';
+  const rawAnswer = completionData.choices?.[0]?.message?.content?.trim() || '';
+  const answer = validateCitations(rawAnswer, rows);
   const citations = extractCitations(answer, rows);
 
   const usedChunks = rows.map((row: RetrievedChunkRow) => ({

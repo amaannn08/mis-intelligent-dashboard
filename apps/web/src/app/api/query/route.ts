@@ -7,6 +7,8 @@ import {
   buildHybridRAGPrompt,
   buildStructuredMetricsContext,
   extractCitations,
+  validateCitations,
+  getNoContextRefusal,
   retrieveRelevantChunks,
   routeQuestion,
   type MetricContextRow,
@@ -257,7 +259,17 @@ export async function POST(request: NextRequest) {
 
   // 7. Handle empty retrieval: honest refusal
   if ((!vectorRows || vectorRows.length === 0) && (!structuredRows || structuredRows.length === 0)) {
-    const refusalText = 'I cannot find this information in the uploaded MIS reports.';
+    let refusalCompanyName: string | undefined;
+    if (targetCompanyId) {
+      const matched = knownCompanies.find((c) => c.id === targetCompanyId);
+      refusalCompanyName = matched?.name;
+    }
+
+    const refusalText = getNoContextRefusal({
+      companyName: refusalCompanyName,
+      detectedCompanyNames,
+      metricKeys,
+    });
 
     if (sessionId) {
       try {
@@ -302,10 +314,12 @@ export async function POST(request: NextRequest) {
 
   const { systemPrompt, allCitations } = buildHybridRAGPrompt({
     structuredContext,
+    structuredRows,
     documentRows: vectorRows,
     historyMessages,
     detectedCompanyNames,
     scopeCompanyName,
+    totalPortfolioCompanies: knownCompanies.length || 28,
   });
 
   const deepseekApiKey = process.env.DEEPSEEK_API_KEY;
@@ -327,7 +341,8 @@ export async function POST(request: NextRequest) {
       onFinish: async (event) => {
         if (sessionId) {
           try {
-            const cited = extractCitations(event.text, vectorRows);
+            const validatedAnswer = validateCitations(event.text, allCitations);
+            const cited = extractCitations(validatedAnswer, vectorRows);
             await db.insert(chatMessages).values([
               {
                 sessionId,
@@ -338,7 +353,7 @@ export async function POST(request: NextRequest) {
               {
                 sessionId,
                 role: 'assistant',
-                content: event.text,
+                content: validatedAnswer,
                 citations: cited as unknown as Array<Record<string, unknown>>,
               },
             ]);
@@ -353,10 +368,14 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    const sanitizedCitations = allCitations.filter(
+      (c) => typeof c.index === 'number' && c.index > 0
+    );
+
     return result.toTextStreamResponse({
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
-        'X-Citations': toHeaderSafeJson(allCitations),
+        'X-Citations': toHeaderSafeJson(sanitizedCitations),
       },
     });
   } catch (err: unknown) {

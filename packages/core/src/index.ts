@@ -62,6 +62,12 @@ export {
   formatConversationHistory,
   buildGroupedDocumentContext,
   buildHybridRAGPrompt,
+  buildHybridRAGContext,
+  buildAnalystSystemPrompt,
+  validateCitations,
+  getNoContextRefusal,
+  computeCoverage,
+  formatCoverageBlock,
   type AnswerQueryOptions,
   type RetrieveChunksOptions,
   type RetrievedChunkRow,
@@ -72,6 +78,8 @@ export {
   type StructuredContextOptions,
   type HistoryMessage,
   type HybridRAGContextOptions,
+  type DataCoverage,
+  type BuildAnalystSystemPromptOptions,
 } from './rag/index.js';
 
 // Pipeline

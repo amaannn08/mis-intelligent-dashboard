@@ -18,15 +18,17 @@ interface ChatThreadProps {
 }
 
 const PORTFOLIO_SUGGESTIONS = [
-  'Which company has the highest burn rate?',
-  'Compare revenue performance across the portfolio',
-  'Who is growing fastest month-over-month?',
+  'Rank portfolio companies by latest revenue',
+  'Which companies show negative EBITDA?',
+  'Compare run rate against burn',
+  'Which companies are missing their latest MIS?',
 ];
 
 const COMPANY_SUGGESTIONS = [
-  'What was the revenue in the latest MIS filing?',
-  'Summarise recent founder and business commentary',
-  'How has EBITDA trended over recent quarters?',
+  'Summarise the latest MIS in three bullets',
+  'Show revenue, EBITDA and burn for the last 4 periods',
+  'What changed versus the previous month?',
+  'Flag any metric that looks inconsistent',
 ];
 
 export const ChatThread = React.memo(function ChatThread({
@@ -76,12 +78,13 @@ export const ChatThread = React.memo(function ChatThread({
           </div>
 
           <div className="space-y-2">
-            <h2 className="text-xl font-bold tracking-tight text-[#1A1815] dark:text-[#FAFAF8]">
+            <h2 className="text-xl font-bold tracking-tight text-[#1A1815] dark:text-[#FAFAF8] font-['Syne',sans-serif]">
               {scopeCompanyName ? `${scopeCompanyName} Intelligence` : 'Portfolio MIS Intelligence'}
             </h2>
             <p className="text-xs text-[#5A5650] dark:text-[#9A958E] max-w-md mx-auto leading-relaxed">
-              Ask questions across all verified MIS filings. Answers are synthesized directly from
-              extracted data tables and grounded with verifiable citations.
+              {scopeCompanyName
+                ? `Searches every verified MIS filed in the database for ${scopeCompanyName} to deliver grounded, citation-backed intelligence.`
+                : 'Searches every verified MIS filed across the portfolio database to deliver grounded, citation-backed intelligence.'}
             </p>
           </div>
 

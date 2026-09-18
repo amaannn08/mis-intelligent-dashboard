@@ -23,11 +23,20 @@ export const ChatMessageRenderer = React.memo(function ChatMessageRenderer({
     // 1. Replace [CALCULATED: reason] with `CALCULATED: reason`
     let res = content.replace(/\[CALCULATED:\s*([^\]]+)\]/g, '`calc: $1`');
 
-    // 2. Replace [n] with [[n]](#cite-n)
+    // 2. Drop fabricated citations if citations list is available
+    if (citations && citations.length > 0) {
+      const validIndices = new Set(citations.map((c) => c.index));
+      res = res.replace(/(?:(\s+)\[(\d+)\]|\[(\d+)\])/g, (match, space, p1, p2) => {
+        const num = parseInt(p1 || p2, 10);
+        return validIndices.has(num) ? match : '';
+      });
+    }
+
+    // 3. Replace [n] with [[n]](#cite-n)
     res = res.replace(/(?<!\[)\[(\d+)\](?!\()/g, '[[#cite-$1]](#cite-$1)');
 
     return res;
-  }, [content]);
+  }, [content, citations]);
 
   const components: Components = React.useMemo(() => {
     return {
