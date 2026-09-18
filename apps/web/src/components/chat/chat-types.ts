@@ -1,4 +1,5 @@
 import type { Citation } from '@/components/ai/citation-list';
+import type { ChartConfig } from '@mis/core';
 
 export interface ChatSessionSummary {
   id: string;
@@ -15,6 +16,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   citations?: Citation[];
+  charts?: ChartConfig[];
   createdAt: string;
   isStreaming?: boolean;
   error?: string | null;

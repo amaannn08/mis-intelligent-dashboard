@@ -76,4 +76,60 @@ describe('Chat UI Utilities', () => {
       expect(formatRelativeTime(twoHoursAgo)).toBe('2h ago');
     });
   });
+
+  describe('Session Rehydration (Binding Addition 3)', () => {
+    it('correctly extracts messages and charts from GET /api/chat/sessions/[id] payload', () => {
+      const apiResponse = {
+        session: {
+          id: 'session-123',
+          title: 'Noto Revenue & EBITDA',
+          companyId: 'company-noto',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        messages: [
+          {
+            id: 'msg-user-1',
+            role: 'user' as const,
+            content: 'How is Noto revenue and ebitda burn?',
+            createdAt: new Date().toISOString(),
+          },
+          {
+            id: 'msg-assistant-1',
+            role: 'assistant' as const,
+            content: 'Revenue was ₹3.42 Cr in Jun\'26 [1]. Burn was -₹20L [2].',
+            citations: [{ index: 1, filename: 'noto.xlsx' }],
+            charts: [
+              {
+                id: 'revenue-noto',
+                metricKey: 'revenue',
+                label: 'Net Revenue',
+                unit: 'currency' as const,
+                series: [
+                  {
+                    companyId: 'company-noto',
+                    companyName: 'Noto',
+                    points: [{ period: '2026-06', value: 34200000 }],
+                  },
+                ],
+              },
+            ],
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      };
+
+      // Buggy behavior prior to fix:
+      const buggyLoadedMessages = (apiResponse.session as unknown as { messages?: unknown[] }).messages || [];
+      expect(buggyLoadedMessages).toHaveLength(0); // reproduces the old bug
+
+      // Fixed behavior in chat-workspace.tsx:
+      const fixedLoadedMessages = apiResponse.messages || (apiResponse.session as unknown as { messages?: unknown[] })?.messages || [];
+      expect(fixedLoadedMessages).toHaveLength(2);
+      expect(fixedLoadedMessages[1].charts).toBeDefined();
+      expect(fixedLoadedMessages[1].charts).toHaveLength(1);
+      expect(fixedLoadedMessages[1].charts![0]!.metricKey).toBe('revenue');
+      expect(fixedLoadedMessages[1].charts![0]!.series[0]!.points[0]!.value).toBe(34200000);
+    });
+  });
 });

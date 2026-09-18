@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { CitationList, type Citation } from './citation-list';
+import { ChatMetricChart } from '@/components/chat/chat-metric-chart';
+import type { ChartConfig } from '@mis/core';
 import { Sparkles, Send, Square, AlertCircle, RefreshCw, MessageSquare } from 'lucide-react';
 
 interface QueryPanelProps {
@@ -25,6 +27,7 @@ export function QueryPanel({
   const [question, setQuestion] = React.useState('');
   const [streamingAnswer, setStreamingAnswer] = React.useState('');
   const [citations, setCitations] = React.useState<Citation[]>([]);
+  const [charts, setCharts] = React.useState<ChartConfig[]>([]);
   const [isStreaming, setIsStreaming] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [lastQuestion, setLastQuestion] = React.useState<string | null>(null);
@@ -60,6 +63,7 @@ export function QueryPanel({
     setQuestion('');
     setStreamingAnswer('');
     setCitations([]);
+    setCharts([]);
     setError(null);
     setLastQuestion(null);
   };
@@ -72,6 +76,7 @@ export function QueryPanel({
     setError(null);
     setStreamingAnswer('');
     setCitations([]);
+    setCharts([]);
     setLastQuestion(q);
     setIsStreaming(true);
 
@@ -110,6 +115,19 @@ export function QueryPanel({
           }
         } catch (e) {
           console.warn('Failed to parse citations header:', e);
+        }
+      }
+
+      // Parse charts from header
+      const chartsHeader = res.headers.get('X-Charts');
+      if (chartsHeader) {
+        try {
+          const parsedCharts = JSON.parse(chartsHeader);
+          if (Array.isArray(parsedCharts)) {
+            setCharts(parsedCharts);
+          }
+        } catch (e) {
+          console.warn('Failed to parse charts header:', e);
         }
       }
 
@@ -191,8 +209,8 @@ export function QueryPanel({
         </div>
       </div>
 
-      {/* Answer Area (if there is an answer or error) */}
-      {(streamingAnswer || isStreaming || error) && (
+      {/* Answer Area (if there is an answer, charts, or error) */}
+      {(streamingAnswer || isStreaming || error || (charts && charts.length > 0)) && (
         <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
           {lastQuestion && (
             <div className="flex items-start gap-2 text-xs text-muted-foreground pb-2 border-b border-border/40">
@@ -206,6 +224,11 @@ export function QueryPanel({
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{error}</span>
             </div>
+          )}
+
+          {/* Inline Metric Charts */}
+          {charts && charts.length > 0 && (
+            <ChatMetricChart charts={charts} />
           )}
 
           {streamingAnswer && (

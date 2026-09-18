@@ -15,6 +15,13 @@
       "when": 1789591074824,
       "tag": "0001_equal_iron_man",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789596000000,
+      "tag": "0002_add_chat_message_charts",
+      "breakpoints": true
     }
   ]
 }

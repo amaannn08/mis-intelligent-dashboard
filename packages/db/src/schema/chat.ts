@@ -23,6 +23,9 @@ export const chatMessages = pgTable(
     citations: jsonb('citations')
       .$type<Array<Record<string, unknown>>>()
       .default(sql`'[]'::jsonb`),
+    charts: jsonb('charts')
+      .$type<Array<Record<string, unknown>>>()
+      .default(sql`'[]'::jsonb`),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [

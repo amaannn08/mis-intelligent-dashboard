@@ -4,6 +4,8 @@ import * as React from 'react';
 import type { ChatMessage } from './chat-types';
 import { CitationList, type Citation } from '@/components/ai/citation-list';
 import { ChatMessageRenderer } from './chat-message-renderer';
+import { ChatMetricChart } from './chat-metric-chart';
+import type { ChartConfig } from '@mis/core';
 import { Sparkles, AlertCircle, RotateCcw } from 'lucide-react';
 
 interface ChatThreadProps {
@@ -11,6 +13,7 @@ interface ChatThreadProps {
   isStreaming: boolean;
   streamingText: string;
   streamingCitations: Citation[];
+  streamingCharts?: ChartConfig[];
   scopeCompanyName?: string | null;
   onSelectSuggestion: (suggestion: string) => void;
   onCitationClick: (citation: Citation) => void;
@@ -36,6 +39,7 @@ export const ChatThread = React.memo(function ChatThread({
   isStreaming,
   streamingText,
   streamingCitations,
+  streamingCharts,
   scopeCompanyName,
   onSelectSuggestion,
   onCitationClick,
@@ -168,6 +172,11 @@ export const ChatThread = React.memo(function ChatThread({
                     </div>
                   ) : (
                     <div className="rounded-2xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] p-4 shadow-xs space-y-3">
+                      {/* Inline Metric Charts */}
+                      {message.charts && message.charts.length > 0 && (
+                        <ChatMetricChart charts={message.charts} />
+                      )}
+
                       <ChatMessageRenderer
                         content={message.content}
                         citations={message.citations}
@@ -210,6 +219,11 @@ export const ChatThread = React.memo(function ChatThread({
 
             <div className="flex-1 min-w-0">
               <div className="rounded-2xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] p-4 shadow-xs space-y-3">
+                {/* Inline Metric Charts (mounts immediately upon X-Charts header) */}
+                {streamingCharts && streamingCharts.length > 0 && (
+                  <ChatMetricChart charts={streamingCharts} />
+                )}
+
                 {!streamingText ? (
                   <div className="flex items-center gap-2 text-xs text-[#9A958E] py-2 font-mono">
                     <div className="w-2 h-2 rounded-full bg-[#FF7102] animate-ping" />

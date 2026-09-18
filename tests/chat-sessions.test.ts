@@ -78,6 +78,38 @@ describe('Chat Sessions API: /api/chat/sessions', () => {
     expect(getData.session.id).toBe(sessionId);
     expect(Array.isArray(getData.messages)).toBe(true);
 
+    // Verify messages with charts are retrieved and preserved
+    const { db, chatMessages } = await import('@mis/db');
+    await db.insert(chatMessages).values({
+      sessionId,
+      role: 'assistant',
+      content: 'Revenue was ₹1.5 Cr [1].',
+      charts: [
+        {
+          id: 'revenue-noto',
+          metricKey: 'revenue',
+          label: 'Net Revenue',
+          unit: 'currency',
+          series: [
+            {
+              companyId: null,
+              companyName: 'Noto',
+              points: [{ period: '2025-06', value: 15000000 }],
+            },
+          ],
+        },
+      ],
+    });
+
+    const getResWithMsg = await getSession(getReq, { params: Promise.resolve({ id: sessionId }) });
+    const dataWithMsg = await getResWithMsg.json();
+    expect(dataWithMsg.messages.length).toBeGreaterThan(0);
+    const lastMsg = dataWithMsg.messages[dataWithMsg.messages.length - 1];
+    expect(lastMsg.charts).toBeDefined();
+    expect(Array.isArray(lastMsg.charts)).toBe(true);
+    expect(lastMsg.charts[0].metricKey).toBe('revenue');
+    expect(lastMsg.charts[0].series[0].points[0].value).toBe(15000000);
+
     // 4. Update session title and set companyId to null (All portfolio)
     const patchReq = new NextRequest(`http://localhost:3000/api/chat/sessions/${sessionId}`, {
       method: 'PATCH',

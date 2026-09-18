@@ -4,6 +4,7 @@ import * as React from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import type { ChatSessionSummary, ChatMessage, CompanyOption } from './chat-types';
 import type { Citation } from '@/components/ai/citation-list';
+import type { ChartConfig } from '@mis/core';
 import { ChatSidebar } from './chat-sidebar';
 import { ChatThread } from './chat-thread';
 import { ChatComposer } from './chat-composer';
@@ -44,6 +45,7 @@ export function ChatWorkspace({ initialCompanies }: ChatWorkspaceProps = {}) {
   const [isStreaming, setIsStreaming] = React.useState(false);
   const [streamingText, setStreamingText] = React.useState('');
   const [streamingCitations, setStreamingCitations] = React.useState<Citation[]>([]);
+  const [streamingCharts, setStreamingCharts] = React.useState<import('@mis/core').ChartConfig[]>([]);
   const [lastQuestion, setLastQuestion] = React.useState<string | null>(null);
 
   // Citation inspection drawer
@@ -126,16 +128,16 @@ export function ChatWorkspace({ initialCompanies }: ChatWorkspaceProps = {}) {
     return [];
   }, []);
 
-  // 3. Load messages for a given session
+  // 3. Load messages for a given session (Fix: data.messages from API)
   const loadSessionMessages = React.useCallback(async (sessionId: string) => {
     setIsLoadingMessages(true);
     try {
       const res = await fetch(`/api/chat/sessions/${sessionId}`);
       if (res.ok) {
         const data = await res.json();
-        const sessionDetail = data.session;
-        setMessages(sessionDetail.messages || []);
-        setSelectedCompanyId(sessionDetail.companyId);
+        const loadedMessages = data.messages || data.session?.messages || [];
+        setMessages(loadedMessages);
+        setSelectedCompanyId(data.session?.companyId || null);
       } else {
         setActiveSessionId(null);
         setMessages([]);
@@ -408,6 +410,7 @@ export function ChatWorkspace({ initialCompanies }: ChatWorkspaceProps = {}) {
     setIsStreaming(true);
     setStreamingText('');
     setStreamingCitations([]);
+    setStreamingCharts([]);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -450,6 +453,21 @@ export function ChatWorkspace({ initialCompanies }: ChatWorkspaceProps = {}) {
         }
       }
 
+      // Parse charts from header
+      let parsedCharts: ChartConfig[] = [];
+      const chartsHeader = res.headers.get('X-Charts');
+      if (chartsHeader) {
+        try {
+          const rawCharts = JSON.parse(chartsHeader);
+          if (Array.isArray(rawCharts)) {
+            parsedCharts = rawCharts;
+            setStreamingCharts(parsedCharts);
+          }
+        } catch (e) {
+          console.warn('Failed to parse X-Charts header:', e);
+        }
+      }
+
       // Stream text body
       const reader = res.body?.getReader();
       if (!reader) {
@@ -473,12 +491,14 @@ export function ChatWorkspace({ initialCompanies }: ChatWorkspaceProps = {}) {
         role: 'assistant',
         content: accumulatedText,
         citations: parsedCitations,
+        charts: parsedCharts,
         createdAt: new Date().toISOString(),
       };
 
       setMessages((prev) => [...prev, finalAssistantMsg]);
       setStreamingText('');
       setStreamingCitations([]);
+      setStreamingCharts([]);
 
       // Auto-update session title if it was "New chat"
       if (currentSessionId && activeSession && activeSession.title === 'New chat') {
@@ -494,6 +514,7 @@ export function ChatWorkspace({ initialCompanies }: ChatWorkspaceProps = {}) {
             role: 'assistant',
             content: `${streamingText} *(generation stopped)*`,
             citations: streamingCitations,
+            charts: streamingCharts,
             createdAt: new Date().toISOString(),
           };
           setMessages((prev) => [...prev, abortedMsg]);
@@ -512,6 +533,7 @@ export function ChatWorkspace({ initialCompanies }: ChatWorkspaceProps = {}) {
       setIsStreaming(false);
       setStreamingText('');
       setStreamingCitations([]);
+      setStreamingCharts([]);
       abortControllerRef.current = null;
     }
   };
@@ -691,6 +713,7 @@ export function ChatWorkspace({ initialCompanies }: ChatWorkspaceProps = {}) {
             isStreaming={isStreaming}
             streamingText={streamingText}
             streamingCitations={streamingCitations}
+            streamingCharts={streamingCharts}
             scopeCompanyName={activeCompany?.name}
             onSelectSuggestion={handleSendMessage}
             onCitationClick={(citation) => setInspectedCitation(citation)}

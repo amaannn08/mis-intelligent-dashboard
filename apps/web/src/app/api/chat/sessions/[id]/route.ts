@@ -60,6 +60,7 @@ export async function GET(request: NextRequest, context: RouteParams) {
         role: chatMessages.role,
         content: chatMessages.content,
         citations: chatMessages.citations,
+        charts: chatMessages.charts,
         createdAt: chatMessages.createdAt,
       })
       .from(chatMessages)

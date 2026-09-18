@@ -6,6 +6,7 @@ import { apiError, handleZodError } from '@/lib/api-response';
 import {
   buildHybridRAGPrompt,
   buildStructuredMetricsContext,
+  buildChartPayload,
   extractCitations,
   validateCitations,
   getNoContextRefusal,
@@ -161,9 +162,17 @@ export async function POST(request: NextRequest) {
       `;
       const params: unknown[] = [targetCompanyId];
 
-      if (metricKeys.length > 0) {
+      const effectiveMetricKeys = [...metricKeys];
+      if (
+        (effectiveMetricKeys.includes('run_rate') || /\barr\b/i.test(question)) &&
+        !effectiveMetricKeys.includes('revenue')
+      ) {
+        effectiveMetricKeys.push('revenue');
+      }
+
+      if (effectiveMetricKeys.length > 0) {
         querySql += ` AND m.metric_key = ANY($2::text[])`;
-        params.push(metricKeys);
+        params.push(effectiveMetricKeys);
       }
 
       querySql += ` ORDER BY c.name ASC, m.metric_key ASC, m.reporting_period ASC;`;
@@ -279,12 +288,14 @@ export async function POST(request: NextRequest) {
             role: 'user',
             content: question,
             citations: [],
+            charts: [],
           },
           {
             sessionId,
             role: 'assistant',
             content: refusalText,
             citations: [],
+            charts: [],
           },
         ]);
         await db
@@ -301,11 +312,21 @@ export async function POST(request: NextRequest) {
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
         'X-Citations': '[]',
+        'X-Charts': '[]',
       },
     });
   }
 
-  // 8. Build hybrid RAG prompt with structured metrics, grouped document excerpts, and conversation history
+  // 8. Build deterministic chart payload from retrieved structured metric rows
+  const chartPayload = buildChartPayload({
+    structuredRows,
+    metricKeys,
+    targetCompanyId,
+    detectedCompanyNames,
+    question,
+  });
+
+  // 9. Build hybrid RAG prompt with structured metrics, grouped document excerpts, and conversation history
   let scopeCompanyName: string | undefined;
   if (targetCompanyId) {
     const matched = knownCompanies.find((c) => c.id === targetCompanyId);
@@ -349,12 +370,14 @@ export async function POST(request: NextRequest) {
                 role: 'user',
                 content: question,
                 citations: [],
+                charts: [],
               },
               {
                 sessionId,
                 role: 'assistant',
                 content: validatedAnswer,
                 citations: cited as unknown as Array<Record<string, unknown>>,
+                charts: chartPayload.charts as unknown as Array<Record<string, unknown>>,
               },
             ]);
             await db
@@ -376,6 +399,7 @@ export async function POST(request: NextRequest) {
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
         'X-Citations': toHeaderSafeJson(sanitizedCitations),
+        'X-Charts': toHeaderSafeJson(chartPayload.charts),
       },
     });
   } catch (err: unknown) {

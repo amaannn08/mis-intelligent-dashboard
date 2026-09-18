@@ -68,6 +68,7 @@ export {
   getNoContextRefusal,
   computeCoverage,
   formatCoverageBlock,
+  buildChartPayload,
   type AnswerQueryOptions,
   type RetrieveChunksOptions,
   type RetrievedChunkRow,
@@ -80,6 +81,11 @@ export {
   type HybridRAGContextOptions,
   type DataCoverage,
   type BuildAnalystSystemPromptOptions,
+  type ChartPoint,
+  type ChartSeriesData,
+  type ChartConfig,
+  type ChartPayload,
+  type BuildChartPayloadOptions,
 } from './rag/index.js';
 
 // Pipeline
