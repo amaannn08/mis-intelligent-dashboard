@@ -6,6 +6,8 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { CitationList, type Citation } from './citation-list';
 import { ChatMetricChart } from '@/components/chat/chat-metric-chart';
+import { KeyFiguresStrip } from '@/components/chat/key-figures-strip';
+import { ChatMessageRenderer } from '@/components/chat/chat-message-renderer';
 import type { ChartConfig } from '@mis/core';
 import { Sparkles, Send, Square, AlertCircle, RefreshCw, MessageSquare } from 'lucide-react';
 
@@ -226,18 +228,23 @@ export function QueryPanel({
             </div>
           )}
 
+          {/* Scannable Key-Figures Strip */}
+          {charts && charts.length > 0 && (
+            <KeyFiguresStrip charts={charts} />
+          )}
+
           {/* Inline Metric Charts */}
           {charts && charts.length > 0 && (
             <ChatMetricChart charts={charts} />
           )}
 
           {streamingAnswer && (
-            <div className="text-sm leading-relaxed text-foreground whitespace-pre-wrap font-sans">
-              {streamingAnswer}
-              {isStreaming && (
-                <span className="inline-block w-1.5 h-4 ml-1 align-middle bg-primary animate-pulse" />
-              )}
-            </div>
+            <ChatMessageRenderer
+              content={streamingAnswer}
+              isStreaming={isStreaming}
+              citations={citations}
+              onCitationClick={onCitationClick}
+            />
           )}
 
           {isStreaming && !streamingAnswer && (

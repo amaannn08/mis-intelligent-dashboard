@@ -11,9 +11,13 @@ import {
   Tooltip as RechartsTooltip,
   Cell,
   ReferenceLine,
+  LabelList,
+  Rectangle,
+  type BarShapeProps,
+  type LabelProps,
 } from 'recharts';
 import { cn } from '@/lib/utils';
-import { formatIndianCurrency, formatPercent } from '@/lib/formatters';
+import { formatIndianCurrency, formatPercent, formatCompactCurrency } from '@/lib/formatters';
 import type { ChartConfig } from '@mis/core';
 
 export interface ChatMetricChartProps {
@@ -22,7 +26,7 @@ export interface ChatMetricChartProps {
 }
 
 const COMPANY_COLORS = [
-  '#FF7102', // WEH Orange
+  '#FF7102', // WEH Terracotta / Orange
   '#3A5F8C', // WEH Navy / Slate
   '#107569', // Teal
   '#7A5AF8', // Purple
@@ -42,6 +46,19 @@ function formatShortPeriod(period: string): string {
   ];
 
   return `${monthNames[monthIdx] || match[2]}'${yearShort}`;
+}
+
+function formatValueLabel(val: number, isPercent: boolean, isCurrency: boolean): string {
+  if (typeof val !== 'number' || isNaN(val)) return '';
+  if (val === 0) return '0';
+  if (isPercent) {
+    const sign = val < 0 ? '-' : '';
+    return `${sign}${Math.abs(val).toFixed(0)}%`;
+  }
+  if (isCurrency) {
+    return formatCompactCurrency(val, { space: false });
+  }
+  return val.toLocaleString('en-IN');
 }
 
 interface CustomTooltipProps {
@@ -130,8 +147,7 @@ function SingleMetricChart({ chart }: { chart: ChartConfig }) {
     return { chartData: data, seriesKeys: keys, startPeriod: start, endPeriod: end };
   }, [chart]);
 
-  // Zero-baseline domain calculation:
-  // Must always include 0 so bars anchor to the 0 baseline and negative bars extend downwards.
+  // Zero-baseline domain calculation with 18% domain headroom padding
   const yDomain = React.useMemo<[number, number]>(() => {
     let minVal = 0;
     let maxVal = 0;
@@ -149,8 +165,8 @@ function SingleMetricChart({ chart }: { chart: ChartConfig }) {
       return [0, 100];
     }
 
-    const domainMin = minVal < 0 ? Math.round(minVal * 1.15) : 0;
-    const domainMax = maxVal > 0 ? Math.round(maxVal * 1.15) : 0;
+    const domainMin = minVal < 0 ? Math.floor(minVal * 1.18) : 0;
+    const domainMax = maxVal > 0 ? Math.ceil(maxVal * 1.18) : 0;
     return [domainMin, domainMax];
   }, [chartData, seriesKeys]);
 
@@ -159,12 +175,7 @@ function SingleMetricChart({ chart }: { chart: ChartConfig }) {
       if (val === 0) return '0';
       if (isPercent) return `${val.toFixed(0)}%`;
       if (isCurrency) {
-        const abs = Math.abs(val);
-        const sign = val < 0 ? '-' : '';
-        if (abs >= 10_000_000) return `${sign}₹${(abs / 10_000_000).toFixed(1)}Cr`;
-        if (abs >= 100_000) return `${sign}₹${(abs / 100_000).toFixed(0)}L`;
-        if (abs >= 1_000) return `${sign}₹${(abs / 1_000).toFixed(0)}k`;
-        return `${sign}₹${abs}`;
+        return formatCompactCurrency(val, { space: false });
       }
       return val.toLocaleString('en-IN');
     },
@@ -180,11 +191,49 @@ function SingleMetricChart({ chart }: { chart: ChartConfig }) {
   const rangeLabel = startPeriod && endPeriod ? `${startPeriod} to ${endPeriod}` : `${chartData.length} periods`;
   const ariaLabel = `${chart.label} · ${companyLabel} · ${rangeLabel}`;
 
+  // Suppress value labels if chart has more than 8 bars (crowding prevention)
+  const showValueLabels = chartData.length <= 8;
+
+  const renderBarLabel = React.useCallback(
+    (props: LabelProps) => {
+      const x = Number(props.x ?? 0);
+      const y = Number(props.y ?? 0);
+      const width = Number(props.width ?? 0);
+      const height = Number(props.height ?? 0);
+      const value = props.value;
+
+      if (value === undefined || value === null) return null;
+      const num = Number(value);
+      if (isNaN(num)) return null;
+
+      const formatted = formatValueLabel(num, isPercent, isCurrency);
+      const isNegative = num < 0;
+      // In Recharts Bar with negative value, y is at zero line, height is positive downwards
+      const labelY = isNegative ? y + height + 11 : y - 4;
+
+      return (
+        <text
+          x={x + width / 2}
+          y={labelY}
+          fill={isNegative ? '#B42318' : '#5A5650'}
+          textAnchor="middle"
+          fontSize={9.5}
+          fontFamily="var(--font-dm-mono), monospace"
+          fontWeight={500}
+          className={isNegative ? 'fill-[#B42318]' : 'fill-[#5A5650] dark:fill-[#A8A39A]'}
+        >
+          {formatted}
+        </text>
+      );
+    },
+    [isPercent, isCurrency]
+  );
+
   return (
     <div
       role="img"
       aria-label={ariaLabel}
-      className="w-full rounded-xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] p-3 sm:p-4 shadow-2xs space-y-2 min-w-0 overflow-hidden"
+      className="w-full rounded-xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] p-2.5 sm:p-3.5 shadow-2xs space-y-1.5 min-w-0 overflow-hidden"
     >
       {/* Micro-label Header */}
       <div className="flex items-center justify-between">
@@ -198,12 +247,23 @@ function SingleMetricChart({ chart }: { chart: ChartConfig }) {
         </span>
       </div>
 
-      {/* Bar Chart Container */}
-      <div className="h-[150px] sm:h-[170px] w-full min-w-0">
+      {/* Editorial Compact Bar Chart Container: 160 px Desktop / 140 px Mobile */}
+      <div className="h-[140px] sm:h-[160px] w-full min-w-0">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={{ top: 8, right: 8, left: -14, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E8E5DE" />
-            <ReferenceLine y={0} stroke="#E8E5DE" strokeWidth={1} />
+          <BarChart
+            data={chartData}
+            barCategoryGap="24%"
+            margin={{ top: 18, right: 12, left: -6, bottom: 0 }}
+          >
+            <CartesianGrid
+              strokeDasharray="2 4"
+              vertical={false}
+              stroke="#E8E5DE"
+              strokeOpacity={0.7}
+              className="dark:stroke-[#2E2A24]"
+            />
+            {/* Emphasized Zero Baseline */}
+            <ReferenceLine y={0} stroke="#9A958E" strokeWidth={1.5} />
             <XAxis
               dataKey="formattedPeriod"
               stroke="#9A958E"
@@ -211,10 +271,12 @@ function SingleMetricChart({ chart }: { chart: ChartConfig }) {
               tickLine={false}
               axisLine={false}
             />
+            {/* Single Left Axis ONLY (<= 4 ticks) */}
             <YAxis
               domain={yDomain}
+              tickCount={4}
               stroke="#9A958E"
-              fontSize={10}
+              fontSize={9.5}
               tickLine={false}
               axisLine={false}
               tickFormatter={formatYAxisTick}
@@ -224,9 +286,30 @@ function SingleMetricChart({ chart }: { chart: ChartConfig }) {
               <Bar
                 key={key}
                 dataKey={key}
-                radius={[2, 2, 2, 2]}
+                maxBarSize={36}
                 isAnimationActive={false}
+                shape={(barProps: BarShapeProps) => {
+                  const rawVal = barProps.value;
+                  const val =
+                    typeof rawVal === 'number'
+                      ? rawVal
+                      : Array.isArray(rawVal)
+                        ? Number(rawVal[1] ?? 0)
+                        : Number(rawVal ?? 0);
+                  const isNegative = val < 0;
+                  const radius: [number, number, number, number] = isNegative
+                    ? [0, 0, 4, 4]
+                    : [4, 4, 0, 0];
+                  return <Rectangle {...barProps} radius={radius} />;
+                }}
               >
+                {/* Value labels on bars */}
+                {showValueLabels && (
+                  <LabelList
+                    dataKey={key}
+                    content={renderBarLabel}
+                  />
+                )}
                 {chartData.map((entry, entryIdx) => {
                   const val = entry[key];
                   const numVal = typeof val === 'number' ? val : 0;
@@ -250,13 +333,15 @@ export const ChatMetricChart = React.memo(function ChatMetricChart({
 }: ChatMetricChartProps) {
   if (!charts || charts.length === 0) return null;
 
-  const isMultiGrid = charts.length >= 3;
+  // 2-Column Grid for >= 2 charts at >= 1280 px (xl:grid-cols-2)
+  const isMultiGrid = charts.length >= 2;
 
   return (
     <div
+      data-testid="chat-metric-charts"
       className={cn(
         isMultiGrid
-          ? 'grid grid-cols-1 xl:grid-cols-2 gap-3 my-2 w-full min-w-0'
+          ? 'grid grid-cols-1 xl:grid-cols-2 gap-3.5 my-2 w-full min-w-0'
           : 'space-y-3 my-2 w-full min-w-0',
         className
       )}

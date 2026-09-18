@@ -96,27 +96,47 @@ export async function processDocument(
       throw new Error(`Company with ID '${doc.companyId}' not found.`);
     }
 
-    // 2. Read binary file from disk
-    let fileBytes: Buffer;
-    const resolvedPath = path.isAbsolute(doc.storagePath)
-      ? doc.storagePath
-      : path.resolve(process.cwd(), doc.storagePath);
+    // 2. Read binary file (3-tier fallback: Blob -> disk -> document_blobs)
+    let fileBytes: Buffer | null = null;
 
-    if (fs.existsSync(resolvedPath)) {
-      fileBytes = fs.readFileSync(resolvedPath);
-    } else {
-      const [blobRow] = await db
-        .select()
-        .from(documentBlobs)
-        .where(eq(documentBlobs.documentId, documentId));
-
-      if (blobRow && blobRow.data) {
-        fileBytes = blobRow.data;
-      } else {
-        throw new Error(
-          `File binary not found at resolved storage path '${resolvedPath}' or in document_blobs`
-        );
+    if (doc.blobUrl) {
+      try {
+        const token = process.env.BLOB_READ_WRITE_TOKEN;
+        const res = await fetch(doc.blobUrl, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) {
+          const ab = await res.arrayBuffer();
+          fileBytes = Buffer.from(ab);
+        }
+      } catch (err) {
+        console.warn(`Failed to fetch doc ${documentId} from blobUrl, attempting fallback:`, err);
       }
+    }
+
+    if (!fileBytes) {
+      const resolvedPath = path.isAbsolute(doc.storagePath)
+        ? doc.storagePath
+        : path.resolve(process.cwd(), doc.storagePath);
+
+      if (fs.existsSync(resolvedPath)) {
+        fileBytes = fs.readFileSync(resolvedPath);
+      } else {
+        const [blobRow] = await db
+          .select()
+          .from(documentBlobs)
+          .where(eq(documentBlobs.documentId, documentId));
+
+        if (blobRow && blobRow.data) {
+          fileBytes = blobRow.data;
+        }
+      }
+    }
+
+    if (!fileBytes) {
+      throw new Error(
+        `File binary not found at blobUrl, resolved storage path '${doc.storagePath}', or in document_blobs`
+      );
     }
 
     // --- STEP 1: PARSE ---

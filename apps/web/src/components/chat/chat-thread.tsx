@@ -5,6 +5,7 @@ import type { ChatMessage } from './chat-types';
 import { CitationList, type Citation } from '@/components/ai/citation-list';
 import { ChatMessageRenderer } from './chat-message-renderer';
 import { ChatMetricChart } from './chat-metric-chart';
+import { KeyFiguresStrip } from './key-figures-strip';
 import type { ChartConfig } from '@mis/core';
 import { Sparkles, AlertCircle, RotateCcw } from 'lucide-react';
 
@@ -172,6 +173,11 @@ export const ChatThread = React.memo(function ChatThread({
                     </div>
                   ) : (
                     <div className="rounded-2xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] p-4 shadow-xs space-y-3">
+                      {/* Scannable Key-Figures Strip */}
+                      {message.charts && message.charts.length > 0 && (
+                        <KeyFiguresStrip charts={message.charts} />
+                      )}
+
                       {/* Inline Metric Charts */}
                       {message.charts && message.charts.length > 0 && (
                         <ChatMetricChart charts={message.charts} />
@@ -219,6 +225,11 @@ export const ChatThread = React.memo(function ChatThread({
 
             <div className="flex-1 min-w-0">
               <div className="rounded-2xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] p-4 shadow-xs space-y-3">
+                {/* Scannable Key-Figures Strip */}
+                {streamingCharts && streamingCharts.length > 0 && (
+                  <KeyFiguresStrip charts={streamingCharts} />
+                )}
+
                 {/* Inline Metric Charts (mounts immediately upon X-Charts header) */}
                 {streamingCharts && streamingCharts.length > 0 && (
                   <ChatMetricChart charts={streamingCharts} />

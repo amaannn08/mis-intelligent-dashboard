@@ -11,6 +11,8 @@ export const documents = pgTable(
       .references(() => companies.id, { onDelete: 'cascade' }),
     filename: text('filename').notNull(),
     storagePath: text('storage_path').notNull(),
+    blobUrl: text('blob_url'),
+    blobPathname: text('blob_pathname'),
     mime: text('mime').notNull(),
     fileType: text('file_type').notNull(),
     reportingPeriod: varchar('reporting_period', { length: 7 }), // 'YYYY-MM'

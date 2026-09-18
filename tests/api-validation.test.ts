@@ -145,6 +145,11 @@ describe('API Validation: File Upload & Size Ceilings', () => {
     }
   });
 
+  it('verifies Vercel Blob 50 MB upload ceiling constant', async () => {
+    const { UPLOAD_MAX_BYTES_BLOB } = await import('../apps/web/src/lib/constants.js');
+    expect(UPLOAD_MAX_BYTES_BLOB).toBe(50 * 1024 * 1024);
+  });
+
   it('validates file extensions and rejects unsupported extensions', () => {
     const dummyBuffer = Buffer.from('test');
 

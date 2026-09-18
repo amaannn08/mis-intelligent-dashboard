@@ -318,7 +318,7 @@ export async function getDocumentDetail(id: string): Promise<DocumentDetail | nu
 }
 
 /**
- * Fetch original binary buffer from document_blobs (or fallback to disk in dev).
+ * Fetch original binary buffer from Vercel Blob, document_blobs fallback, or disk mirror.
  */
 export async function getDocumentBinary(
   id: string
@@ -326,7 +326,27 @@ export async function getDocumentBinary(
   const [doc] = await db.select().from(documents).where(eq(documents.id, id));
   if (!doc) return null;
 
-  // 1. Try document_blobs table
+  // 1. Try Vercel Blob (Private store)
+  if (doc.blobUrl) {
+    try {
+      const token = process.env.BLOB_READ_WRITE_TOKEN;
+      const res = await fetch(doc.blobUrl, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.ok) {
+        const arrayBuf = await res.arrayBuffer();
+        return {
+          buffer: Buffer.from(arrayBuf),
+          mime: doc.mime || 'application/octet-stream',
+          filename: doc.filename,
+        };
+      }
+    } catch (err) {
+      console.warn(`Vercel Blob fetch failed for doc ${id}, attempting fallback:`, err);
+    }
+  }
+
+  // 2. Try document_blobs table (legacy fallback for existing files)
   const [blob] = await db
     .select()
     .from(documentBlobs)
@@ -340,7 +360,7 @@ export async function getDocumentBinary(
     };
   }
 
-  // 2. Try disk storagePath (dev mirror)
+  // 3. Try disk storagePath (dev mirror)
   if (doc.storagePath) {
     const resolvedPath = path.isAbsolute(doc.storagePath)
       ? doc.storagePath
@@ -360,11 +380,21 @@ export async function getDocumentBinary(
 }
 
 /**
- * Delete document and cascade delete jobs, chunks, metrics, blobs, and disk file.
+ * Delete document and cascade delete jobs, chunks, metrics, blobs, and Vercel Blob / disk storage.
  */
 export async function deleteDocument(id: string): Promise<boolean> {
   const [doc] = await db.select().from(documents).where(eq(documents.id, id));
   if (!doc) return false;
+
+  // Clean up blob from Vercel Blob if present
+  if (doc.blobUrl) {
+    try {
+      const { del } = await import('@vercel/blob');
+      await del(doc.blobUrl, { token: process.env.BLOB_READ_WRITE_TOKEN });
+    } catch (e) {
+      console.warn(`Failed to delete blob from Vercel Blob for doc ${id}:`, e);
+    }
+  }
 
   // Clean up disk file if present
   if (doc.storagePath) {

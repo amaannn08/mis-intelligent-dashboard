@@ -5,6 +5,9 @@ import { cn } from '@/lib/utils';
 import { formatBytes } from '@/lib/formatters';
 import { UploadCloud, FileSpreadsheet, AlertCircle, CheckCircle2, Loader2, X } from 'lucide-react';
 
+import { upload } from '@vercel/blob/client';
+import { UPLOAD_MAX_BYTES_BLOB } from '@/lib/constants';
+
 interface FileUploadState {
   file: File;
   id?: string;
@@ -19,6 +22,41 @@ interface UploadDropzoneProps {
   className?: string;
 }
 
+async function checkMagicBytes(file: File): Promise<boolean> {
+  try {
+    const slice = file.slice(0, 8);
+    const buffer = await slice.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+
+    // PDF: %PDF- (0x25, 0x50, 0x44, 0x46, 0x2D)
+    if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46 && bytes[4] === 0x2D) {
+      return true;
+    }
+
+    // XLSX / ZIP: PK\x03\x04 (0x50, 0x4B, 0x03, 0x04)
+    if (bytes[0] === 0x50 && bytes[1] === 0x4B && bytes[2] === 0x03 && bytes[3] === 0x04) {
+      return true;
+    }
+
+    // XLS (CFB): \xD0\xCF\x11\xE0 (0xD0, 0xCF, 0x11, 0xE0)
+    if (bytes[0] === 0xD0 && bytes[1] === 0xCF && bytes[2] === 0x11 && bytes[3] === 0xE0) {
+      return true;
+    }
+
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+async function computeSha256(file: File): Promise<string> {
+  const arrayBuffer = await file.arrayBuffer();
+  const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 export function UploadDropzone({
   companyId,
   onUploadAccepted,
@@ -28,10 +66,9 @@ export function UploadDropzone({
   const [queue, setQueue] = React.useState<FileUploadState[]>([]);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
-  // Maximum allowed size: 4.5 MB in production (15 MB in development)
-  const isDev = process.env.NODE_ENV === 'development';
-  const maxBytes = isDev ? 15 * 1024 * 1024 : 4.5 * 1024 * 1024;
-  const maxMbLabel = isDev ? '15 MB (Dev)' : '4.5 MB';
+  // Maximum allowed size: 50 MB default for Vercel Blob client uploads
+  const maxBytes = UPLOAD_MAX_BYTES_BLOB;
+  const maxMbLabel = `${Math.round(maxBytes / (1024 * 1024))} MB`;
 
   const uploadingRef = React.useRef<Set<File>>(new Set());
 
@@ -40,23 +77,81 @@ export function UploadDropzone({
     uploadingRef.current.add(file);
 
     setQueue((prev) =>
-      prev.map((item) => (item.file === file ? { ...item, status: 'uploading', progress: 20 } : item))
+      prev.map((item) => (item.file === file ? { ...item, status: 'uploading', progress: 15 } : item))
     );
 
-    const formData = new FormData();
-    formData.append('companyId', companyId);
-    formData.append('file', file);
-
     try {
+      // 1. Magic bytes validation
+      const isValidSignature = await checkMagicBytes(file);
+      if (!isValidSignature) {
+        setQueue((prev) =>
+          prev.map((item) =>
+            item.file === file
+              ? {
+                  ...item,
+                  status: 'error',
+                  progress: 0,
+                  errorMessage: 'Invalid file signature (magic bytes mismatch for spreadsheet/PDF)',
+                }
+              : item
+          )
+        );
+        return;
+      }
+
+      // 2. SHA-256 checksum calculation
+      setQueue((prev) =>
+        prev.map((item) => (item.file === file ? { ...item, progress: 30 } : item))
+      );
+      const checksum = await computeSha256(file);
+
+      // 3. Direct client-side streaming upload to Vercel Blob
+      setQueue((prev) =>
+        prev.map((item) => (item.file === file ? { ...item, progress: 50 } : item))
+      );
+
+      let blobResult;
+      try {
+        blobResult = await upload(file.name, file, {
+          access: 'private',
+          handleUploadUrl: '/api/documents/upload',
+          clientPayload: JSON.stringify({ companyId }),
+        });
+      } catch (blobErr: unknown) {
+        const msg = (blobErr as Error).message || 'Failed to upload file to blob storage';
+        setQueue((prev) =>
+          prev.map((item) =>
+            item.file === file
+              ? { ...item, status: 'error', progress: 0, errorMessage: msg }
+              : item
+          )
+        );
+        return;
+      }
+
+      setQueue((prev) =>
+        prev.map((item) => (item.file === file ? { ...item, progress: 85 } : item))
+      );
+
+      // 4. Server registration handshake
       const response = await fetch('/api/documents', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId,
+          filename: file.name,
+          blobUrl: blobResult.url,
+          blobPathname: blobResult.pathname,
+          sizeBytes: file.size,
+          checksum,
+          mime: file.type || blobResult.contentType || 'application/octet-stream',
+        }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        const message = data.error?.message || 'Failed to upload document';
+        const message = data.error?.message || 'Failed to register document';
         setQueue((prev) =>
           prev.map((item) =>
             item.file === file ? { ...item, status: 'error', progress: 0, errorMessage: message } : item

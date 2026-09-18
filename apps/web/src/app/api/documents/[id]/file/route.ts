@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { apiError } from '@/lib/api-response';
 import { getDocumentBinary, getDocumentDetail } from '@/lib/documents';
 import { isUuid } from '@/lib/companies';
+import { verifySession } from '@/lib/auth';
+import { SESSION_COOKIE_NAME } from '@/lib/constants';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,9 +12,15 @@ interface RouteParams {
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   context: RouteParams
 ) {
+  const sessionCookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+  const session = await verifySession(sessionCookie);
+  if (!session) {
+    return apiError('UNAUTHORIZED', 'Authentication required to access document binary.', 401);
+  }
+
   const { id } = await context.params;
 
   if (!isUuid(id)) {

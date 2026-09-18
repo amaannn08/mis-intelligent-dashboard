@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { Citation } from '@/components/ai/citation-list';
 
 interface ChatMessageRendererProps {
@@ -9,6 +10,21 @@ interface ChatMessageRendererProps {
   isStreaming?: boolean;
   citations?: Citation[];
   onCitationClick?: (citation: Citation) => void;
+  className?: string;
+}
+
+function getChildrenText(children: React.ReactNode): string {
+  if (!children) return '';
+  if (typeof children === 'string') return children;
+  if (typeof children === 'number') return String(children);
+  if (Array.isArray(children)) return children.map(getChildrenText).join('');
+  if (typeof children === 'object' && children !== null && 'props' in children) {
+    const props = (children as { props?: { children?: React.ReactNode } }).props;
+    if (props?.children) {
+      return getChildrenText(props.children);
+    }
+  }
+  return '';
 }
 
 export const ChatMessageRenderer = React.memo(function ChatMessageRenderer({
@@ -16,35 +32,69 @@ export const ChatMessageRenderer = React.memo(function ChatMessageRenderer({
   isStreaming = false,
   citations = [],
   onCitationClick,
+  className,
 }: ChatMessageRendererProps) {
-  // Preprocess text: turn standalone [n] into markdown links [#cite-n] so ReactMarkdown renders them via custom `a` component
+  // Preprocess text:
+  // 1. Convert [CALCULATED: ...] to code tags
+  // 2. Normalize whitespace around asterisks so CommonMark parses **bold** cleanly
+  // 3. Drop fabricated citations
+  // 4. Tokenize [n] into clean links [$1](#cite-$1) without broken nested brackets
   const preprocessed = React.useMemo(() => {
     if (!content) return '';
-    // 1. Replace [CALCULATED: reason] with `CALCULATED: reason`
     let res = content.replace(/\[CALCULATED:\s*([^\]]+)\]/g, '`calc: $1`');
 
-    // 2. Drop fabricated citations if citations list is available
+    // Drop fabricated citations if citations list is available
     if (citations && citations.length > 0) {
       const validIndices = new Set(citations.map((c) => c.index));
-      res = res.replace(/(?:(\s+)\[(\d+)\]|\[(\d+)\])/g, (match, space, p1, p2) => {
+      res = res.replace(/(?:(\s+)\[(\d+)\]|\[(\d+)\])/g, (match, _space, p1, p2) => {
         const num = parseInt(p1 || p2, 10);
         return validIndices.has(num) ? match : '';
       });
     }
 
-    // 3. Replace [n] with [[n]](#cite-n)
-    res = res.replace(/(?<!\[)\[(\d+)\](?!\()/g, '[[#cite-$1]](#cite-$1)');
+    // Convert [n] to clean markdown link [n](#cite-n) — no nested bracket munging
+    res = res.replace(/(?<!\[)\[(\d+)\](?!\()/g, '[$1](#cite-$1)');
 
     return res;
   }, [content, citations]);
 
   const components: Components = React.useMemo(() => {
     return {
-      p: ({ children }) => (
-        <p className="text-[13px] leading-relaxed [&:not(:last-child)]:mb-2 text-[#1A1815] dark:text-[#FAFAF8]">
-          {children}
-        </p>
-      ),
+      p: ({ children }) => {
+        const rawText = getChildrenText(children).trim();
+        const lower = rawText.toLowerCase();
+
+        // 1. Editorial Callout: "So the trend to watch:"
+        if (lower.startsWith('so the trend to watch:') || lower.startsWith('trend to watch:')) {
+          return (
+            <div
+              data-testid="trend-callout"
+              className="border-l-2 border-[#FF7102] bg-[#FAFAF8] dark:bg-[#1A1815] px-3.5 py-2.5 my-3 rounded-r-lg text-[13.5px] italic text-[#1A1815] dark:text-[#FAFAF8] leading-[1.55] shadow-2xs"
+            >
+              {children}
+            </div>
+          );
+        }
+
+        // 2. Provenance Meta Row: "Basis:"
+        if (lower.startsWith('basis:')) {
+          return (
+            <div
+              data-testid="basis-meta-row"
+              className="pt-2.5 mt-3 border-t border-[#E8E5DE]/70 dark:border-[#2E2A24] text-[11px] font-mono text-[#9A958E] dark:text-[#7A7670] leading-normal"
+            >
+              {children}
+            </div>
+          );
+        }
+
+        // Standard narrative prose: 14.5px, line-height 1.60, mb-3.5
+        return (
+          <p className="text-[14.5px] leading-[1.60] [&:not(:last-child)]:mb-3.5 text-[#1A1815] dark:text-[#FAFAF8]">
+            {children}
+          </p>
+        );
+      },
       h1: ({ children }) => (
         <h1 className="mb-2 mt-3 text-[15px] font-bold text-[#1A1815] dark:text-[#FAFAF8]">
           {children}
@@ -61,28 +111,34 @@ export const ChatMessageRenderer = React.memo(function ChatMessageRenderer({
         </h3>
       ),
       ul: ({ children }) => (
-        <ul className="my-2 list-disc list-inside space-y-1 text-[13px] leading-relaxed text-[#1A1815] dark:text-[#FAFAF8]">
+        <ul className="my-2 list-disc list-inside space-y-1 text-[14px] leading-[1.60] text-[#1A1815] dark:text-[#FAFAF8]">
           {children}
         </ul>
       ),
       ol: ({ children }) => (
-        <ol className="my-2 list-decimal list-inside space-y-1 text-[13px] leading-relaxed text-[#1A1815] dark:text-[#FAFAF8]">
+        <ol className="my-2 list-decimal list-inside space-y-1 text-[14px] leading-[1.60] text-[#1A1815] dark:text-[#FAFAF8]">
           {children}
         </ol>
       ),
       li: ({ children }) => (
-        <li className="text-[13px] leading-relaxed text-[#1A1815] dark:text-[#FAFAF8]">{children}</li>
+        <li className="text-[14px] leading-[1.60] text-[#1A1815] dark:text-[#FAFAF8]">
+          {children}
+        </li>
       ),
       blockquote: ({ children }) => (
-        <blockquote className="my-2 border-l-2 border-[#FF7102] pl-3 text-[13px] italic text-[#5A5650] dark:text-[#9A958E]">
+        <blockquote className="my-2 border-l-2 border-[#FF7102] pl-3 text-[13.5px] italic text-[#5A5650] dark:text-[#9A958E]">
           {children}
         </blockquote>
       ),
       hr: () => <hr className="my-3 border-[#E8E5DE] dark:border-[#2E2A24]" />,
+      // High-contrast strong tags for bold figures
       strong: ({ children }) => (
-        <strong className="font-semibold text-[#1A1815] dark:text-[#FAFAF8]">{children}</strong>
+        <strong className="font-semibold text-[#1A1815] dark:text-[#FAFAF8] tracking-tight">
+          {children}
+        </strong>
       ),
       em: ({ children }) => <em className="italic">{children}</em>,
+      // Quiet, subordinate footnote citations: [1]
       a: ({ href, children }) => {
         if (href && href.startsWith('#cite-')) {
           const num = parseInt(href.replace('#cite-', ''), 10);
@@ -92,15 +148,16 @@ export const ChatMessageRenderer = React.memo(function ChatMessageRenderer({
           return (
             <button
               type="button"
+              data-testid="inline-citation"
               onClick={() => {
                 if (matchedCitation && onCitationClick) {
                   onCitationClick(matchedCitation);
                 }
               }}
-              className="inline-flex items-center justify-center font-mono text-[10px] px-1.5 py-0.2 mx-0.5 rounded bg-[#FFEFE2] dark:bg-[#362215] text-[#FF7102] dark:text-[#FFA057] hover:bg-[#FFD0AB] border border-[#FFD0AB] dark:border-[#FF7102]/40 transition-colors cursor-pointer font-semibold align-baseline"
+              className="inline-flex items-center justify-center font-mono text-[9.5px] px-1 py-0 mx-0.5 rounded text-[#9A958E] dark:text-[#87867F] hover:text-[#FF7102] hover:bg-[#F5F4F0] dark:hover:bg-[#26231F] transition-colors cursor-pointer align-baseline select-none"
               title={
                 matchedCitation
-                  ? `${matchedCitation.filename || 'MIS filing'} (chunk #${matchedCitation.chunkIndex})`
+                  ? `${matchedCitation.filename || 'MIS filing'} · chunk #${matchedCitation.chunkIndex}`
                   : `Citation [${num}]`
               }
             >
@@ -130,7 +187,6 @@ export const ChatMessageRenderer = React.memo(function ChatMessageRenderer({
           );
         }
 
-        // Standard inline detection: no newline in text and no language class
         const isBlock = className?.includes('language-') || text.includes('\n');
 
         return !isBlock ? (
@@ -170,8 +226,13 @@ export const ChatMessageRenderer = React.memo(function ChatMessageRenderer({
   }
 
   return (
-    <div className="space-y-1 font-sans text-[13px]">
-      <ReactMarkdown components={components}>{preprocessed}</ReactMarkdown>
+    <div
+      data-testid="chat-message-prose"
+      className={`max-w-[680px] space-y-1 font-sans text-[14.5px] leading-[1.60] ${className || ''}`}
+    >
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+        {preprocessed}
+      </ReactMarkdown>
       {isStreaming && (
         <span
           className="inline-block w-1.5 h-4 ml-1 align-middle bg-[#FF7102] animate-pulse rounded-xs"

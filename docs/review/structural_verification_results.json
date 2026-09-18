@@ -1,0 +1,101 @@
+{
+  "timestamp": "2026-09-18T06:43:40.292Z",
+  "question": "how is the monthly revenue for the past few months and how is the ebitda burn",
+  "desktop": {
+    "chartsCount": 2,
+    "plots": [
+      {
+        "chartIndex": 1,
+        "ariaLabel": "Net Revenue · NOTO · Jun'25 to Sep'25",
+        "containerHeightPx": 160,
+        "containerWidthPx": 374,
+        "yAxisCount": 1,
+        "yAxisTickCount": 4,
+        "barsCount": 4,
+        "valueLabelsCount": 4,
+        "valueLabelsSample": [
+          "₹1.50Cr",
+          "₹1.66Cr",
+          "₹1.82Cr",
+          "₹2Cr"
+        ],
+        "decorativeSeriesCount": 0,
+        "hasZeroBaseline": true
+      },
+      {
+        "chartIndex": 2,
+        "ariaLabel": "EBITDA · NOTO · Jun'25 to Sep'25",
+        "containerHeightPx": 160,
+        "containerWidthPx": 374,
+        "yAxisCount": 1,
+        "yAxisTickCount": 4,
+        "barsCount": 4,
+        "valueLabelsCount": 4,
+        "valueLabelsSample": [
+          "-₹18L",
+          "-₹18.5L",
+          "-₹18L",
+          "-₹18L"
+        ],
+        "decorativeSeriesCount": 0,
+        "hasZeroBaseline": true
+      }
+    ],
+    "hasKeyFiguresStrip": true,
+    "keyFiguresCount": 2,
+    "keyFiguresSample": [
+      "₹2 CrNet Revenue(Sep'25)",
+      "-₹18 LEBITDA(Sep'25)"
+    ],
+    "hasTrendCallout": true,
+    "trendCalloutText": "So the trend to watch: revenue is compounding at ~10% MoM while EBITDA burn holds flat, so the loss is shrinking as a share of revenue — but the absolute EBITDA line has not yet moved.",
+    "hasBasisMetaRow": true,
+    "basisMetaRowText": "Basis: NOTO · Jun'25–Sep'25 · Revenue, Operating EBITDA, Net Cash Burn, Gross Margin [1].",
+    "strongCount": 15,
+    "strongSample": [
+      "₹1.5 Cr in Jun'25",
+      "₹1.66 Cr in Jul'25",
+      "₹1.82 Cr in Aug'25",
+      "₹2 Cr in Sep'25",
+      "42.0%",
+      "-₹18 L in Jun'25",
+      "-₹18.5 L in Jul'25",
+      "-₹18 L in Aug'25",
+      "-₹18 L in Sep'25",
+      "-12.0% in Jun'25",
+      "-9.0% in Sep'25",
+      "-₹22.5 L in Jun'25",
+      "-₹19.8 L in Sep'25",
+      "₹340 L → ₹277.9 L",
+      "So the trend to watch:"
+    ],
+    "inlineCitationsCount": 7,
+    "citationMarksSample": [
+      "[1]",
+      "[1]",
+      "[1]",
+      "[1]",
+      "[1]",
+      "[1]",
+      "[1]"
+    ],
+    "proseWidthPx": 680,
+    "hasBrokenAsterisks": false
+  },
+  "mobile": {
+    "mobileHeights": [
+      140,
+      140
+    ],
+    "bodyScrollWidth": 412,
+    "bodyClientWidth": 412,
+    "hasHorizontalOverflow": false
+  },
+  "fallbackDownload": {
+    "status": 200,
+    "bytes": 18724,
+    "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "contentDisposition": "inline; filename=\"sample_mis.xlsx\"",
+    "verified": true
+  }
+}

@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { NextRequest, NextResponse, after } from 'next/server';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
@@ -6,12 +7,15 @@ import {
   checkDuplicateDocument,
   computeChecksum,
   getDocumentsList,
+  sanitizeFilename,
   storeDocumentMetadataAndBytes,
   validateFileBytesAndExtension,
   validateFileSize,
 } from '@/lib/documents';
 import { isUuid } from '@/lib/companies';
 import { processDocument } from '@mis/core';
+import { db, documents, companies } from '@mis/db';
+import { eq } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,11 +46,150 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const contentType = request.headers.get('content-type') || '';
+
+  const invalidateCaches = () => {
+    try {
+      revalidatePath('/');
+      revalidatePath('/companies');
+      revalidatePath('/companies/[slug]', 'page');
+    } catch (e) {
+      console.error('Failed to revalidate paths after document upload:', e);
+    }
+  };
+
+  // Branch A: Direct Vercel Blob Registration (JSON body)
+  if (contentType.includes('application/json')) {
+    let body: {
+      companyId?: string;
+      blobUrl?: string;
+      blobPathname?: string;
+      filename?: string;
+      sizeBytes?: number;
+      checksum?: string;
+      mime?: string;
+    };
+
+    try {
+      body = await request.json();
+    } catch {
+      return apiError('BAD_REQUEST', 'Expected valid JSON request body.', 400);
+    }
+
+    const { companyId, blobUrl, blobPathname, filename, sizeBytes, checksum, mime } = body;
+
+    if (!companyId || typeof companyId !== 'string' || !isUuid(companyId)) {
+      if (blobUrl) {
+        try {
+          const { del } = await import('@vercel/blob');
+          await del(blobUrl, { token: process.env.BLOB_READ_WRITE_TOKEN });
+        } catch {}
+      }
+      return apiError('BAD_REQUEST', 'A valid companyId (UUID) is required.', 400);
+    }
+
+    if (!blobUrl || typeof blobUrl !== 'string') {
+      return apiError('BAD_REQUEST', 'A valid blobUrl is required.', 400);
+    }
+
+    // Verify company exists
+    const [company] = await db
+      .select({ id: companies.id })
+      .from(companies)
+      .where(eq(companies.id, companyId));
+
+    if (!company) {
+      try {
+        const { del } = await import('@vercel/blob');
+        await del(blobUrl, { token: process.env.BLOB_READ_WRITE_TOKEN });
+      } catch {}
+      return apiError('NOT_FOUND', `Company with ID '${companyId}' not found.`, 404);
+    }
+
+    // Deduplicate by SHA-256 checksum per company
+    if (checksum) {
+      const existingDoc = await checkDuplicateDocument(companyId, checksum);
+      if (existingDoc && existingDoc.status !== 'failed') {
+        try {
+          const { del } = await import('@vercel/blob');
+          await del(blobUrl, { token: process.env.BLOB_READ_WRITE_TOKEN });
+        } catch (delErr) {
+          console.warn('Failed to delete duplicate blob:', delErr);
+        }
+        return apiError(
+          'DUPLICATE_FILE',
+          `A document with identical content already exists for this company (ID: ${existingDoc.id}, Status: ${existingDoc.status}).`,
+          409
+        );
+      }
+    }
+
+    const safeFilename = sanitizeFilename(filename || 'document');
+    const ext = path.extname(safeFilename).toLowerCase();
+    const detectedType = ext === '.pdf' ? 'pdf' : ext === '.xls' ? 'xls' : 'xlsx';
+
+    const [doc] = await db
+      .insert(documents)
+      .values({
+        companyId,
+        filename: safeFilename,
+        storagePath: blobUrl,
+        blobUrl,
+        blobPathname: blobPathname || null,
+        mime: mime || 'application/octet-stream',
+        fileType: detectedType,
+        sizeBytes: Number(sizeBytes) || 0,
+        checksum: checksum || `chk-${Date.now()}`,
+        status: 'pending',
+        originalRetained: true,
+        uploadedAt: new Date(),
+      })
+      .returning();
+
+    invalidateCaches();
+
+    const { searchParams } = new URL(request.url);
+    const isSync = searchParams.get('sync') === 'true';
+
+    if (isSync && process.env.NODE_ENV !== 'production') {
+      try {
+        await processDocument(doc.id);
+        invalidateCaches();
+      } catch (err) {
+        console.error(`Synchronous processing failed for doc ${doc.id}:`, err);
+      }
+    } else {
+      after(async () => {
+        try {
+          await processDocument(doc.id);
+          invalidateCaches();
+        } catch (err) {
+          console.error(`Detached processing error for doc ${doc.id}:`, err);
+        }
+      });
+    }
+
+    return NextResponse.json(
+      {
+        document: {
+          id: doc.id,
+          status: doc.status,
+          filename: doc.filename,
+          companyId: doc.companyId,
+          originalRetained: doc.originalRetained,
+        },
+        message: 'Upload accepted. Processing started.',
+      },
+      { status: 202 }
+    );
+  }
+
+  // Branch B: Multipart/Form-Data (Direct / Dev fallback)
   let formData: FormData;
   try {
     formData = await request.formData();
   } catch {
-    return apiError('BAD_REQUEST', 'Expected multipart/form-data request body.', 400);
+    return apiError('BAD_REQUEST', 'Expected multipart/form-data or application/json request body.', 400);
   }
 
   const companyId = formData.get('companyId');
@@ -121,16 +264,6 @@ export async function POST(request: NextRequest) {
   // 5. Asynchronous Seam: kick off pipeline detached via Next.js after()
   const { searchParams } = new URL(request.url);
   const isSync = searchParams.get('sync') === 'true';
-
-  const invalidateCaches = () => {
-    try {
-      revalidatePath('/');
-      revalidatePath('/companies');
-      revalidatePath('/companies/[slug]', 'page');
-    } catch (e) {
-      console.error('Failed to revalidate paths after document upload:', e);
-    }
-  };
 
   invalidateCaches();
 
