@@ -14,6 +14,8 @@ import { Sparkles, Send, Square, AlertCircle, RefreshCw, MessageSquare } from 'l
 interface QueryPanelProps {
   companyId?: string;
   companyName?: string;
+  multiCompanyFilterActive?: boolean;
+  selectedCount?: number;
   placeholder?: string;
   onCitationClick?: (citation: Citation) => void;
   className?: string;
@@ -22,6 +24,8 @@ interface QueryPanelProps {
 export function QueryPanel({
   companyId,
   companyName,
+  multiCompanyFilterActive,
+  selectedCount,
   placeholder,
   onCitationClick,
   className,
@@ -189,25 +193,43 @@ export function QueryPanel({
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
-          <Button
-            asChild
-            variant="ghost"
-            size="sm"
-            className="text-xs h-7 gap-1 text-muted-foreground hover:text-foreground"
-          >
-            <Link href={companyId ? `/chat?companyId=${companyId}` : '/chat'}>
-              <MessageSquare className="w-3 h-3" />
-              <span>Open in Chat</span>
-            </Link>
-          </Button>
-
-          {(streamingAnswer || error) && (
-            <Button variant="ghost" size="sm" onClick={handleClear} className="text-xs h-7 gap-1">
-              <RefreshCw className="w-3 h-3" />
-              <span>Reset</span>
-            </Button>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-1.5">
+          {multiCompanyFilterActive && !companyId && (
+            <span
+              className="text-[10px] text-[#9A958E] font-mono select-none"
+              title={`Chat model operates single-company or portfolio-wide. Multi-company filter (${selectedCount ?? 0} selected) cannot be carried into chat.`}
+            >
+              (Chat opens portfolio-wide)
+            </span>
           )}
+
+          <div className="flex items-center gap-1.5">
+            <Button
+              asChild
+              variant="ghost"
+              size="sm"
+              className="text-xs h-7 gap-1 text-muted-foreground hover:text-foreground"
+              title={
+                companyId
+                  ? `Open full chat scoped to ${companyName}`
+                  : multiCompanyFilterActive
+                  ? 'Multi-company filter active; opening chat in portfolio scope'
+                  : 'Open full portfolio chat'
+              }
+            >
+              <Link href={companyId ? `/chat?companyId=${companyId}` : '/chat'}>
+                <MessageSquare className="w-3 h-3" />
+                <span>Open in Chat</span>
+              </Link>
+            </Button>
+
+            {(streamingAnswer || error) && (
+              <Button variant="ghost" size="sm" onClick={handleClear} className="text-xs h-7 gap-1">
+                <RefreshCw className="w-3 h-3" />
+                <span>Reset</span>
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 

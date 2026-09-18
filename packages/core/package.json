@@ -10,6 +10,11 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts",
       "types": "./src/index.ts"
+    },
+    "./dashboard": {
+      "import": "./src/dashboard/burn-ebitda.ts",
+      "default": "./src/dashboard/burn-ebitda.ts",
+      "types": "./src/dashboard/burn-ebitda.ts"
     }
   },
   "scripts": {

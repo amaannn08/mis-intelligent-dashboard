@@ -6,12 +6,14 @@ import { useRouter } from 'next/navigation';
 import { PageShell } from '@/components/layout/page-shell';
 import { KpiCard } from '@/components/dashboard/kpi-card';
 import { TrendChart, type ChartDataPoint } from '@/components/dashboard/trend-chart';
+import { BurnEbitdaChart } from '@/components/dashboard/burn-ebitda-chart';
 import { MetricTable, type MetricRowData } from '@/components/dashboard/metric-table';
 import { QueryPanel } from '@/components/ai/query-panel';
 import { StatusPill } from '@/components/ui/status-pill';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Modal } from '@/components/ui/modal';
+import { computeBurnEbitdaSeries } from '@/lib/burn-ebitda';
 import {
   formatBytes,
   formatIndianCurrency,
@@ -114,17 +116,21 @@ export function CompanyWorkspace({
   };
 
   // Find unique periods sorted
-  const allPeriods = Array.from(new Set(metrics.map((m) => m.reportingPeriod))).sort();
+  const allPeriods = React.useMemo(() => {
+    return Array.from(new Set(metrics.map((m) => m.reportingPeriod))).sort();
+  }, [metrics]);
   const latestPeriod = allPeriods[allPeriods.length - 1] || null;
   const previousPeriod = allPeriods.length >= 2 ? allPeriods[allPeriods.length - 2] : null;
 
   // Filter metrics by range
-  let activePeriods = [...allPeriods];
-  if (periodRange === '6M') {
-    activePeriods = activePeriods.slice(-6);
-  } else if (periodRange === '12M') {
-    activePeriods = activePeriods.slice(-12);
-  }
+  const activePeriods = React.useMemo(() => {
+    if (periodRange === '6M') {
+      return allPeriods.slice(-6);
+    } else if (periodRange === '12M') {
+      return allPeriods.slice(-12);
+    }
+    return allPeriods;
+  }, [allPeriods, periodRange]);
 
   // Build standard KPI card data for the 5 metrics
   const standardKpiKeys = [
@@ -217,6 +223,28 @@ export function CompanyWorkspace({
     { label: 'Latest Period', value: latestPeriod ? formatPeriod(latestPeriod) : '—' },
   ];
 
+  const chartTabs = [
+    ...standardKpiKeys,
+    { key: 'burn_ebitda', label: 'Burn & EBITDA %', unit: 'percent', direction: 'up_is_good' as const },
+  ];
+
+  const companyBurnEbitdaPoints = React.useMemo(() => {
+    const rows = activePeriods.map((period) => {
+      const rev = metrics.find((m) => m.metricKey === 'revenue' && m.reportingPeriod === period);
+      const ebitda = metrics.find((m) => m.metricKey === 'ebitda' && m.reportingPeriod === period);
+      const burn = metrics.find((m) => m.metricKey === 'burn' && m.reportingPeriod === period);
+      return {
+        companyId: company.id,
+        companyName: company.name,
+        reportingPeriod: period,
+        revenue: rev?.value ? parseFloat(String(rev.value)) : null,
+        ebitda: ebitda?.value ? parseFloat(String(ebitda.value)) : null,
+        burn: burn?.value ? parseFloat(String(burn.value)) : null,
+      };
+    });
+    return computeBurnEbitdaSeries(rows);
+  }, [activePeriods, metrics, company.id, company.name]);
+
   return (
     <PageShell
       title={company.name}
@@ -268,7 +296,7 @@ export function CompanyWorkspace({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           {/* Metric Selector Tabs */}
           <div className="flex flex-wrap gap-1.5">
-            {standardKpiKeys.map((def) => {
+            {chartTabs.map((def) => {
               const isSelected = selectedMetric === def.key;
               return (
                 <button
@@ -308,14 +336,24 @@ export function CompanyWorkspace({
           </div>
         </div>
 
-        {/* The Recharts Trend Chart */}
-        <TrendChart
-          title={`${company.name} — ${selectedMetricDef.label} Trend`}
-          data={chartDataPoints}
-          metricKey={selectedMetric}
-          unit={selectedMetricDef.unit}
-          height={260}
-        />
+        {/* The Recharts Trend Chart or Burn & EBITDA Chart */}
+        {selectedMetric === 'burn_ebitda' ? (
+          <BurnEbitdaChart
+            title={`${company.name} — Burn & EBITDA Margin % (MoM)`}
+            subtitle="EBITDA Margin % and Net Burn % of Revenue"
+            data={companyBurnEbitdaPoints}
+            totalSelectedCompanies={1}
+            height={260}
+          />
+        ) : (
+          <TrendChart
+            title={`${company.name} — ${selectedMetricDef.label} Trend`}
+            data={chartDataPoints}
+            metricKey={selectedMetric}
+            unit={selectedMetricDef.unit}
+            height={260}
+          />
+        )}
       </div>
 
       {/* Complete Financial Metrics Matrix Table */}

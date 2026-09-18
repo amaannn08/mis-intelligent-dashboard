@@ -154,6 +154,21 @@ export function formatPeriod(period: string | null | undefined): string {
   return `${monthNames[monthIdx] || match[2]} ${year}`;
 }
 
+export function formatShortPeriod(period: string | null | undefined): string {
+  if (!period) return '—';
+  const match = period.match(/^(\d{4})-(\d{2})$/);
+  if (!match || !match[1] || !match[2]) return period;
+
+  const yearShort = match[1].slice(-2);
+  const monthIdx = parseInt(match[2], 10) - 1;
+  const monthNames = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+
+  return `${monthNames[monthIdx] || match[2]}'${yearShort}`;
+}
+
 export function calculateDelta(
   current: number | null | undefined,
   previous: number | null | undefined

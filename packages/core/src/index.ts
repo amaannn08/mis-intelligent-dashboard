@@ -93,3 +93,12 @@ export {
   processDocument,
   type ProcessDocumentOptions,
 } from './pipeline/index.js';
+
+// Dashboard Calculations
+export {
+  computeBurnEbitdaSeries,
+  formatShortPeriod,
+  parseCompanySlugs,
+  type CompanyPeriodRow,
+  type BurnEbitdaPoint,
+} from './dashboard/burn-ebitda.js';
