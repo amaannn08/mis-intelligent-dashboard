@@ -3,6 +3,16 @@ import path from 'node:path';
 import fs from 'node:fs';
 import puppeteer, { Browser, Page } from 'puppeteer-core';
 
+// Credentials are NEVER hardcoded in this repo. Export them before running:
+//   set -a; . ~/.hermes/private/mis-secrets.env; set +a
+const APP_USERNAME = process.env.MIS_AUTH_USERNAME ?? 'wehcrm';
+const APP_PASSWORD = process.env.MIS_AUTH_PASSWORD ?? '';
+if (!APP_PASSWORD) {
+  console.error('MIS_AUTH_PASSWORD is not set — source the private secret store first.');
+  process.exit(1);
+}
+
+
 const BASE_URL = 'http://127.0.0.1:3000';
 const SCREENSHOTS_DIR = path.resolve(process.cwd(), 'docs/screenshots');
 const FIXTURE_PATH = path.resolve(process.cwd(), 'packages/core/fixtures/sample_mis.xlsx');
@@ -138,8 +148,8 @@ async function run() {
 
     // Perform Login
     console.log('--> Performing login with team credentials...');
-    await page.type('#username', 'wehcrm');
-    await page.type('#password', 'REDACTED_PASSWORD');
+    await page.type('#username', APP_USERNAME);
+    await page.type('#password', APP_PASSWORD);
     await Promise.all([
       page.waitForNavigation({ waitUntil: 'networkidle2' }),
       page.click('button[type="submit"]'),
@@ -288,8 +298,8 @@ async function run() {
 
     // Re-login for mobile authenticated routes
     console.log('--> Logging in on mobile view...');
-    await page.type('#username', 'wehcrm');
-    await page.type('#password', 'REDACTED_PASSWORD');
+    await page.type('#username', APP_USERNAME);
+    await page.type('#password', APP_PASSWORD);
     await Promise.all([
       page.waitForNavigation({ waitUntil: 'networkidle2' }),
       page.click('button[type="submit"]'),

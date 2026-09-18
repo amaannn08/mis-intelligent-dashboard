@@ -3,6 +3,16 @@ import path from 'node:path';
 import fs from 'node:fs';
 import puppeteer, { Browser, Page } from 'puppeteer-core';
 
+// Credentials are NEVER hardcoded in this repo. Export them before running:
+//   set -a; . ~/.hermes/private/mis-secrets.env; set +a
+const APP_USERNAME = process.env.MIS_AUTH_USERNAME ?? 'wehcrm';
+const APP_PASSWORD = process.env.MIS_AUTH_PASSWORD ?? '';
+if (!APP_PASSWORD) {
+  console.error('MIS_AUTH_PASSWORD is not set — source the private secret store first.');
+  process.exit(1);
+}
+
+
 const BASE_URL = 'http://127.0.0.1:3000';
 const REVIEW_DIR = path.resolve(process.cwd(), 'docs/review');
 
@@ -138,7 +148,7 @@ async function run() {
     // 3. Test Error State and Enter Submission
     console.log('\n❌ Testing Error Alert & Enter Submit...');
     await page.$eval('#username', (el: any) => { el.value = ''; });
-    await page.type('#username', 'wehcrm');
+    await page.type('#username', APP_USERNAME);
     await page.$eval('#password', (el: any) => { el.value = ''; });
     await page.type('#password', 'WrongPassword123!');
 
@@ -178,8 +188,8 @@ async function run() {
     await page.setViewport({ width: 1512, height: 900, deviceScaleFactor: 2 });
     await page.goto(`${BASE_URL}/login`, { waitUntil: 'networkidle2' });
 
-    await page.type('#username', 'wehcrm');
-    await page.type('#password', 'REDACTED_PASSWORD');
+    await page.type('#username', APP_USERNAME);
+    await page.type('#password', APP_PASSWORD);
     await page.keyboard.press('Enter');
 
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 });

@@ -132,7 +132,7 @@ cp .env.example packages/db/.env
 | `DATABASE_URL` | Yes | PostgreSQL connection string with pgvector support. | `postgresql://mis_app:mis_app_dev@127.0.0.1:5432/mis_dashboard` |
 | `CRM_DATABASE_URL` | Optional | Direct read-only connection to CRM database for company seeding. | `postgresql://readonly@crm.example.com/crm` |
 | `AUTH_USERNAME` | Yes | Team login username for MVP dashboard access. | `wehcrm` |
-| `AUTH_PASSWORD` | Yes | Team login password. | `REDACTED_PASSWORD` |
+| `AUTH_PASSWORD` | Yes | Team login password. | ``<set in Vercel env / private secret store>`` |
 | `COOKIE_SECRET` | Yes | HMAC-SHA256 secret key for signing session cookies (min 32 chars). | `openssl rand -hex 32` |
 | `GEMINI_API_KEY` | Yes | Google Gemini API key for generating 1536-dim embeddings. | `AIzaSy...` |
 | `GEMINI_EMBEDDING_MODEL`| Yes | Embedding model identifier. | `gemini-embedding-001` |
