@@ -1,46 +1,68 @@
 #!/usr/bin/env bash
-# Fix the two deploy blockers: (1) Vercel deployment protection (SSO 302s), (2) env vars with the
-# correct team id. Then redeploy to production and verify.
+# MIS dashboard — one-shot deploy: Neon migrations → Vercel project → env vars → preview → verify → production.
+# Idempotent. Never prints secret values.
+# Hardened: the Vercel token is re-read right before use and refreshed via the CLI if a call is rejected,
+# because auth.json rotates (a stale token returns HTTP 403 "Not authorized").
 set -u
 P=/home/amann/intern-weh/mis-intelligent-dashboard
 SEC=/home/amann/.hermes/private/mis-secrets.env
 export PATH="/home/amann/.local/bin:$PATH"
 PROJECT=mis-intelligent-dashboard
+TEAM_SLUG=amans-projects-f8d5ff4a
 TEAM_ID=team_qr2gkYRec5GIRxCaU9FhUt5O
 API=https://api.vercel.com
+AUTH=/home/amann/.local/share/com.vercel.cli/auth.json
 LOG="$P/DEPLOY_FIX_LOG.md"
 log() { echo "[$(date '+%H:%M:%S')] $*" | tee -a "$LOG"; }
 
 set -a; . "$SEC"; set +a
-TOKEN=$(python3 -c "import json;print(json.load(open('/home/amann/.local/share/com.vercel.cli/auth.json'))['token'])")
 
-log "# deploy fix started"
+# ---- token plumbing ---------------------------------------------------------
+fresh_token() {
+  # ask the CLI to validate/refresh (it rewrites auth.json), then read it
+  timeout 45 vercel whoami >/dev/null 2>&1
+  python3 -c "import json;print(json.load(open('$AUTH'))['token'])"
+}
 
-# ---------------------------------------------------------------- 1. deployment protection OFF
-log "## 1. disabling Vercel deployment protection (that is what the 302s were)"
-curl -s --max-time 40 -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  "$API/v9/projects/$PROJECT?teamId=$TEAM_ID" \
-  -d '{"ssoProtection":null,"passwordProtection":null,"previewDeploymentSuffix":null}' \
-  -o /tmp/patchprot.json -w "   PATCH HTTP %{http_code}\n" | tee -a "$LOG"
-python3 -c "
-import json
-try:
-    d=json.load(open('/tmp/patchprot.json'))
-    print('   ssoProtection now:', d.get('ssoProtection'))
-    print('   passwordProtection now:', d.get('passwordProtection'))
-    if 'error' in d: print('   error:', d['error'])
-except Exception as e: print('   ?', e)" 2>&1 | tee -a "$LOG"
+# curl wrapper: retries a rejected call once after refreshing the token
+api_call() {
+  local method="$1" url="$2" body="${3:-}" code
+  local tok; tok=$(fresh_token)
+  local args=(-s -o /tmp/vcres.json -w "%{http_code}" --max-time 60 -X "$method"
+              -H "Authorization: Bearer $tok")
+  [ -n "$body" ] && args+=(-H "Content-Type: application/json" -d "$body")
+  code=$(curl "${args[@]}" "$url")
+  if [ "$code" = "403" ] || [ "$code" = "401" ]; then
+    sleep 3
+    tok=$(fresh_token)   # CLI refreshes the rotated token
+    args=(-s -o /tmp/vcres.json -w "%{http_code}" --max-time 60 -X "$method" -H "Authorization: Bearer $tok")
+    [ -n "$body" ] && args+=(-H "Content-Type: application/json" -d "$body")
+    code=$(curl "${args[@]}")
+  fi
+  echo "$code"
+}
 
-# ---------------------------------------------------------------- 2. env vars with the RIGHT team id
-log "## 2. environment variables (correct team id: $TEAM_ID)"
+log "# deploy started"
+
+# ---------------------------------------------------------------- 1. Neon migrations
+log "## 1. applying migrations to the production Neon database"
+( cd "$P/packages/db" && DATABASE_URL="$MIS_PROD_DATABASE_URL_DIRECT" nice -n 15 ionice -c3 npm run db:migrate 2>&1 | tail -6 ) \
+  | sed 's/^/      /' | tee -a "$LOG"
+
+# ---------------------------------------------------------------- 2. project exists / protection off
+log "## 2. Vercel project: protection off"
+log "   PATCH HTTP $(api_call PATCH "$API/v9/projects/$PROJECT?teamId=$TEAM_ID" \
+  '{"ssoProtection":null,"passwordProtection":null,"previewDeploymentSuffix":null}')"
+
+# ---------------------------------------------------------------- 3. env vars
+log "## 3. environment variables"
 set_env() {
   local k="$1" v="$2" code eid c2
-  code=$(curl -s -o /tmp/envset.json -w "%{http_code}" --max-time 40 -X POST \
-    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-    "$API/v10/projects/$PROJECT/env?teamId=$TEAM_ID" \
-    -d "$(python3 -c "import json,sys;print(json.dumps({'key':sys.argv[1],'value':sys.argv[2],'type':'encrypted','target':['production','preview','development']}))" "$k" "$v")")
+  code=$(api_call POST "$API/v10/projects/$PROJECT/env?teamId=$TEAM_ID" \
+    "$(python3 -c "import json,sys;print(json.dumps({'key':sys.argv[1],'value':sys.argv[2],'type':'encrypted','target':['production','preview','development']}))" "$k" "$v")")
   if [ "$code" = "200" ] || [ "$code" = "201" ]; then log "   ✓ $k"; return 0; fi
-  eid=$(curl -s --max-time 30 -H "Authorization: Bearer $TOKEN" "$API/v9/projects/$PROJECT/env?teamId=$TEAM_ID" \
+  eid=$(curl -s --max-time 40 -H "Authorization: Bearer $(fresh_token)" \
+    "$API/v9/projects/$PROJECT/env?teamId=$TEAM_ID" \
     | python3 -c "
 import json,sys
 try:
@@ -48,9 +70,8 @@ try:
     if e['key']=='$k': print(e['id'])
 except Exception: pass" | head -1)
   if [ -n "$eid" ]; then
-    c2=$(curl -s -o /dev/null -w "%{http_code}" --max-time 40 -X PATCH -H "Authorization: Bearer $TOKEN" \
-      -H "Content-Type: application/json" "$API/v9/projects/$PROJECT/env/$eid?teamId=$TEAM_ID" \
-      -d "$(python3 -c "import json,sys;print(json.dumps({'value':sys.argv[1]}))" "$v")")
+    c2=$(api_call PATCH "$API/v9/projects/$PROJECT/env/$eid?teamId=$TEAM_ID" \
+      "$(python3 -c "import json,sys;print(json.dumps({'value':sys.argv[1]}))" "$v")")
     log "   ~ $k (updated HTTP $c2)"
   else
     log "   ✗ $k (POST HTTP $code)"
@@ -69,31 +90,30 @@ set_env AUTH_USERNAME "$MIS_AUTH_USERNAME"
 set_env AUTH_PASSWORD "$MIS_AUTH_PASSWORD"
 set_env COOKIE_SECRET "$COOKIE"
 
-log "## 3. env vars now on the project:"
-curl -s --max-time 30 -H "Authorization: Bearer $TOKEN" "$API/v9/projects/$PROJECT/env?teamId=$TEAM_ID" \
-  | python3 -c "
-import json,sys
-try:
-  d=json.load(sys.stdin)
-  for e in sorted(d.get('envs',[]), key=lambda x:x['key']):
-      print('     ', e['key'], '->', e.get('target'))
-except Exception as e: print('   ?', e)" 2>&1 | tee -a "$LOG"
-
-# ---------------------------------------------------------------- 4. production deploy
-log "## 4. production deploy (picks up the new env vars)"
+# ---------------------------------------------------------------- 4. production deploy (with retry)
+log "## 4. production deploy"
 cd "$P" || exit 1
-[ -d .vercel ] || vercel link --yes --project "$PROJECT" --scope amans-projects-f8d5ff4a >/dev/null 2>&1
-PROD_URL=$(nice -n 15 ionice -c3 vercel deploy --prod --yes 2>&1 | tee -a "$LOG" | grep -oE 'https://mis-intelligent-dashboard[a-zA-Z0-9.-]*\.vercel\.app' | tail -1)
-log "   production: ${PROD_URL:-FAILED}"
+[ -d .vercel ] || vercel link --yes --project "$PROJECT" --scope "$TEAM_SLUG" >/dev/null 2>&1
+PROD=""
+for try in 1 2 3; do
+  OUT=$(nice -n 15 ionice -c3 vercel deploy --prod --yes 2>&1)
+  echo "$OUT" | tail -6 | sed 's/^/      /' | tee -a "$LOG"
+  PROD=$(echo "$OUT" | grep -oE 'https://mis-intelligent-dashboard[a-zA-Z0-9.-]*\.vercel\.app' | tail -1)
+  if [ -n "$PROD" ]; then break; fi
+  log "   deploy attempt $try produced no URL — refreshing auth and retrying"
+  fresh_token >/dev/null; sleep 5
+done
+log "   production: ${PROD:-FAILED}"
 
-if [ -n "${PROD_URL:-}" ]; then
-  set_env NEXT_PUBLIC_APP_URL "$PROD_URL"
-  sleep 15
+if [ -n "$PROD" ]; then
+  set_env NEXT_PUBLIC_APP_URL "$PROD"
+  sleep 12
   log "## 5. verification"
   for path in / /login /api/health; do
-    log "   $path -> HTTP $(curl -s -o /dev/null -w '%{http_code}' --max-time 45 "$PROD_URL$path")"
+    log "   $path -> HTTP $(curl -s -o /dev/null -w '%{http_code}' --max-time 45 "$PROD$path")"
   done
-  log "   health body: $(curl -s --max-time 45 "$PROD_URL/api/health")"
-  log "   DONE — $PROD_URL"
+  log "   health body: $(curl -s --max-time 45 "$PROD/api/health")"
+  log "   stable alias: https://mis-intelligent-dashboard.vercel.app -> HTTP $(curl -s -o /dev/null -w '%{http_code}' --max-time 45 https://mis-intelligent-dashboard.vercel.app/api/health)"
+  log "   DONE — $PROD"
 fi
-log "# deploy fix finished"
+log "# deploy finished"
