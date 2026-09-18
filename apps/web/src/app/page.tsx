@@ -145,18 +145,21 @@ export default async function PortfolioOverviewPage() {
             label="Companies Tracked"
             value={totalCompanies ? `${totalCompanies}` : '0'}
             tooltip="Active portfolio companies currently registered in the MIS directory"
+            showDelta={false}
           />
 
           <KpiCard
             label="Documents Processed"
             value={totalDocuments ? `${totalDocuments}` : '0'}
             tooltip="Total verified MIS spreadsheets and PDFs successfully parsed & indexed"
+            showDelta={false}
           />
 
           <KpiCard
             label="Latest Reporting Month"
             value={latestPeriod ? formatPeriod(latestPeriod) : 'Not available'}
             tooltip="Most recent reporting month across received portfolio MIS filings"
+            showDelta={false}
           />
 
           <KpiCard
@@ -167,6 +170,7 @@ export default async function PortfolioOverviewPage() {
                 : 'Not available'
             }
             tooltip="Companies that have submitted MIS reports for the latest reporting month"
+            showDelta={false}
           />
 
           <KpiCard
@@ -175,6 +179,7 @@ export default async function PortfolioOverviewPage() {
             delta={revenueDelta}
             period={latestPeriod ? formatPeriod(latestPeriod) : undefined}
             tooltip="Aggregate monthly revenue summed across companies reporting in the latest period"
+            showDelta={true}
           />
         </div>
 

@@ -25,22 +25,26 @@ export default function OverviewLoading() {
           </div>
         </div>
 
-        {/* 4 KPI Cards Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => (
+        {/* 5 KPI Cards Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          {[1, 2, 3, 4, 5].map((i) => (
             <div
               key={i}
-              className="rounded-2xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] p-4 shadow-xs space-y-3"
+              className="flex flex-col justify-between rounded-2xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17] px-4 py-3 shadow-xs space-y-3"
             >
-              <div className="flex items-center justify-between">
-                <Skeleton className="h-3.5 w-24 rounded bg-[#E8E5DE]/60 dark:bg-[#2E2A24]" />
-                <Skeleton className="h-3.5 w-12 rounded bg-[#E8E5DE]/40 dark:bg-[#2E2A24]" />
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Skeleton className="h-3 w-20 rounded bg-[#E8E5DE]/60 dark:bg-[#2E2A24]" />
+                  <Skeleton className="h-3 w-10 rounded bg-[#E8E5DE]/40 dark:bg-[#2E2A24]" />
+                </div>
+                <Skeleton className="h-7 w-28 rounded bg-[#E8E5DE]/80 dark:bg-[#2E2A24]" />
               </div>
-              <Skeleton className="h-8 w-32 rounded bg-[#E8E5DE]/80 dark:bg-[#2E2A24]" />
-              <div className="flex items-center justify-between pt-1">
-                <Skeleton className="h-3 w-16 rounded bg-[#E8E5DE]/40 dark:bg-[#2E2A24]" />
-                <Skeleton className="h-3 w-20 rounded bg-[#E8E5DE]/40 dark:bg-[#2E2A24]" />
-              </div>
+              {i === 5 && (
+                <div className="flex items-center justify-between pt-1 border-t border-[#E8E5DE] dark:border-[#2E2A24]">
+                  <Skeleton className="h-3 w-12 rounded bg-[#E8E5DE]/40 dark:bg-[#2E2A24]" />
+                  <Skeleton className="h-3 w-12 rounded bg-[#E8E5DE]/40 dark:bg-[#2E2A24]" />
+                </div>
+              )}
             </div>
           ))}
         </div>

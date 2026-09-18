@@ -179,6 +179,7 @@ export function CompanyWorkspace({
       label: def.label,
       value: formattedValue,
       delta,
+      showDelta: true,
       period: latestPeriod ? formatPeriod(latestPeriod) : null,
       kind: (latestItem?.valueKind as 'reported' | 'calculated' | 'estimated') || null,
       derivation: latestItem?.valueKind === 'calculated' ? latestItem.sourceReference : null,
@@ -251,6 +252,7 @@ export function CompanyWorkspace({
             label={kpi.label}
             value={kpi.value}
             delta={kpi.delta}
+            showDelta={kpi.showDelta}
             period={kpi.period}
             kind={kpi.kind}
             derivation={kpi.derivation}
