@@ -36,9 +36,10 @@ describe('Analyst Prompt: Anti-hallucination & Hard Rules', () => {
     expect(prompt).toContain('Every number, date, company name and period you state must come from a block and carry its citation');
     expect(prompt).toContain('A sentence with a number and no citation is a defect');
 
-    // 3. No-forecast rule
-    expect(prompt).toContain('Never invent, estimate, extrapolate or forecast a value');
-    expect(prompt).toContain('No projections, no annualising, no "approximately" numbers');
+    // 3. No-forecast rule / Labelled actuals derivations
+    expect(prompt).toContain('Never predict a future value');
+    expect(prompt).toContain('Deriving from actuals is permitted and encouraged when explicitly labelled');
+    expect(prompt).toContain('Annualised run-rate proxies from latest reported actuals');
     expect(prompt).toContain('only report what is in the uploaded MIS');
 
     // 4. Valid citations only
@@ -67,16 +68,29 @@ describe('Analyst Prompt: Anti-hallucination & Hard Rules', () => {
     expect(prompt).toContain('decline in one short sentence and offer what you can do instead');
   });
 
-  it('enforces professional answer shape and format specifications', () => {
+  it('enforces professional narrative answer shape and illustrative pattern specifications', () => {
     const prompt = buildAnalystSystemPrompt({});
 
     expect(prompt).toContain('FORMAT');
-    expect(prompt).toContain('First line: the direct answer');
-    expect(prompt).toContain('Bold the key number');
+    expect(prompt).toContain('2–4 short paragraphs of narrative analyst prose');
+    expect(prompt).toContain('key figures bolded');
+    expect(prompt).toContain('So the trend to watch:');
     expect(prompt).toContain('Basis:');
     expect(prompt).toContain('₹ Lakh or ₹ Crore consistently');
     expect(prompt).toContain('MoM');
-    expect(prompt).toContain('Keep it under ~180 words unless a table is required');
+    expect(prompt).toContain('Keep it under ~200 words unless a table is required');
+    expect(prompt).toContain('ILLUSTRATIVE PATTERNS (SHAPE ONLY — ADAPT TO RETRIEVED DATA)');
+    expect(prompt).toContain('Pattern 1 — Multi-Metric Trend');
+    expect(prompt).toContain('Pattern 2 — Derived Proxy with Caveat');
+
+    // Binding Addition 6: Trend language needs evidence (at least 3 periods)
+    expect(prompt).toContain('Only provide a "trend to watch" line when the series has at least 3 periods');
+    expect(prompt).toContain('with 1–2 points, describe the values and stop');
+    expect(prompt).toContain('Never characterise a trend from two data points');
+
+    // Binding Addition 7: Forecast ban stays absolute, annualisation proxies from actuals with ≈ and caveat
+    expect(prompt).toContain('each must show the arithmetic inline with ≈, cite the source rows, and explicitly name the caveat');
+    expect(prompt).toContain('quarterly run-rate smooths monthly volatility');
   });
 });
 
