@@ -31,11 +31,18 @@ const globalForDb = globalThis as unknown as {
 
 export const pool =
   globalForDb.pool ??
-  new Pool({
-    connectionString: connectionString || 'postgresql://mis_app:mis_app_dev@127.0.0.1:5432/mis_dashboard',
-    max: 10,
-    idleTimeoutMillis: 30000,
-  });
+  new Pool(
+    connectionString
+      ? {
+          connectionString,
+          max: 10,
+          idleTimeoutMillis: 30000,
+        }
+      : {
+          max: 10,
+          idleTimeoutMillis: 30000,
+        }
+  );
 
 if (process.env.NODE_ENV !== 'production') {
   globalForDb.pool = pool;

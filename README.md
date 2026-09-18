@@ -127,21 +127,28 @@ cp .env.example packages/db/.env
 
 ### Environment Variables Reference
 
-| Variable | Required | Description | Example / Default |
-|---|---|---|---|
-| `DATABASE_URL` | Yes | PostgreSQL connection string with pgvector support. | `postgresql://mis_app:mis_app_dev@127.0.0.1:5432/mis_dashboard` |
-| `CRM_DATABASE_URL` | Optional | Direct read-only connection to CRM database for company seeding. | `postgresql://readonly@crm.example.com/crm` |
-| `AUTH_USERNAME` | Yes | Team login username for MVP dashboard access. | `wehcrm` |
-| `AUTH_PASSWORD` | Yes | Team login password. | ``<set in Vercel env / private secret store>`` |
-| `COOKIE_SECRET` | Yes | HMAC-SHA256 secret key for signing session cookies (min 32 chars). | `openssl rand -hex 32` |
-| `GEMINI_API_KEY` | Yes | Google Gemini API key for generating 1536-dim embeddings. | `AIzaSy...` |
-| `GEMINI_EMBEDDING_MODEL`| Yes | Embedding model identifier. | `gemini-embedding-001` |
-| `EMBEDDING_DIMENSIONS` | Yes | Dimension size for vector columns and embeddings. | `1536` |
-| `DEEPSEEK_API_KEY` | Yes | DeepSeek API key for generative query answering. | `sk-...` |
-| `DEEPSEEK_BASE_URL` | Yes | OpenAI-compatible endpoint URL for DeepSeek. | `https://api.deepseek.com` |
-| `DEEPSEEK_MODEL` | Yes | Model identifier for generation. | `deepseek-chat` |
-| `NEXT_PUBLIC_APP_URL` | Yes | Public application URL for redirects and absolute links. | `http://localhost:3000` |
-| `PORT` | No | Local web server port (default 3000). | `3000` |
+All credentials and configuration must be supplied exclusively via environment variables or gitignored `.env*` files. Never commit actual secret values to source control.
+
+| Variable | Required | Purpose / Description |
+|---|---|---|
+| `DATABASE_URL` | Yes | PostgreSQL connection string with pgvector support |
+| `CRM_DATABASE_URL` | Optional | Direct read-only connection to WEH CRM database for portfolio company seeding |
+| `CRM_ENV_PATH` | Optional | Path to local CRM environment file if connection string is not set directly |
+| `AUTH_USERNAME` | Yes | Team login username for MVP dashboard access |
+| `AUTH_PASSWORD` | Yes | Team login password |
+| `COOKIE_SECRET` | Yes | Secret key (minimum 32 characters) for HMAC-SHA256 session cookie signing |
+| `GEMINI_API_KEY` | Yes | Google Gemini API key for generating 1536-dimensional vector embeddings |
+| `GEMINI_EMBEDDING_MODEL` | Yes | Gemini embedding model identifier (default: `gemini-embedding-001`) |
+| `EMBEDDING_DIMENSIONS` | Yes | Vector column dimensions in PostgreSQL / pgvector (default: `1536`) |
+| `EMBED_DELAY_MS` | Optional | Delay between embedding API calls in milliseconds to prevent rate limits |
+| `DEEPSEEK_API_KEY` | Yes | DeepSeek API key for LLM structured extraction fallback and RAG query generation |
+| `DEEPSEEK_BASE_URL` | Yes | API endpoint URL for DeepSeek (OpenAI-compatible) |
+| `DEEPSEEK_MODEL` | Yes | DeepSeek model identifier (default: `deepseek-chat`) |
+| `NEXT_PUBLIC_APP_URL` | Yes | Public application URL for canonical redirects and absolute links |
+| `PORT` | No | Web server port for local development (default: `3000`) |
+| `MIS_AUTH_USERNAME` | Optional | Username override for headless verification and test scripts |
+| `MIS_AUTH_PASSWORD` | Optional | Password override for headless verification and test scripts |
+| `TEST_URL` | Optional | Base URL for running E2E verification suites |
 
 ---
 
@@ -159,7 +166,7 @@ npm run dev
 # Open http://localhost:3000
 ```
 
-### Quality Checks & Build
+### Quality Checks, Security & Build
 
 ```bash
 # Typecheck all workspaces with zero TypeScript errors
@@ -168,9 +175,25 @@ npm run typecheck
 # Lint all workspaces with zero ESLint errors
 npm run lint
 
+# Scan tracked files for secret leaks and credential patterns
+npm run scan:secrets
+
+# Run all test suites (executes secret scanner before Vitest)
+npm test
+
 # Build production bundle for apps/web
 npm run build
 ```
+
+### Pre-Commit Security Guard
+
+Activate the repository's automated pre-commit hook to block secret-bearing files and API key patterns before they can be committed:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The hook blocks any staged file matching `.env*`, `*.pem`, `*.key`, `*.p12`, or credentials JSON, and runs the secret scanner on staged diffs. See [SECURITY.md](file:///home/amann/intern-weh/mis-intelligent-dashboard/SECURITY.md) for rotation procedures and policy details.
 
 ---
 
@@ -216,7 +239,7 @@ Automated test suites are implemented in **Vitest** to protect the high-risk log
 npm run test
 ```
 
-### Test Coverage Summary (62 Passing Tests)
+### Test Coverage Summary (101 Passing Tests across 10 Test Suites)
 
 1. **`tests/normalisation.test.ts`**:
    - **Label Resolution**: Resolves labels (`Net Revenue`, `Operating EBITDA`, `ARR`, `Net Cash Burn`) to canonical keys.
@@ -248,6 +271,15 @@ npm run test
 7. **`tests/chat-sessions.test.ts`**:
    - **Lifecycle CRUD**: Session creation with default title `New chat`, listing with previews and message counts, retrieving session history, patching title and company scope (`null` for portfolio), and cascading deletion.
    - **Auth Gate & Error Handling**: 401 for unauthenticated calls; 404 for non-existent session UUIDs.
+8. **`tests/analyst-prompt.test.ts`**:
+   - Unified anti-hallucination analyst prompt instructions, strict citation requirements, refusal templates.
+9. **`tests/chat-ui.test.ts`**:
+   - Chat thread state transitions, citation drawer triggers, optimistic rendering helpers.
+10. **`tests/secret-scanner.test.ts`**:
+   - **Pattern Detection**: Flags synthetic `sk-...`, `AIza...`, `npg_...`, `ghp_...`, JWTs, and private key PEM blocks.
+   - **Database Connection Strings**: Rejects hardcoded non-placeholder passwords; permits valid placeholders and dev strings.
+   - **Live Environment Cross-Checking**: Compares tracked files against active secrets loaded from local `.env.local` files.
+   - **Masking**: Guarantees raw secrets are never printed in plain text or logged to test reports.
 
 ---
 

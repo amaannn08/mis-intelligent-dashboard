@@ -15,21 +15,21 @@ interface CrmCompanyRow {
 }
 
 export async function seedCompaniesFromCrm(closePool = false) {
-  const crmEnvPath = process.env.CRM_ENV_PATH || '/home/amann/intern-weh/mvp/crm/backend/.env';
-
   let crmConnectionString = process.env.CRM_DATABASE_URL;
 
-  if (!crmConnectionString) {
-    if (!fs.existsSync(crmEnvPath)) {
-      throw new Error(`CRM .env file not found at ${crmEnvPath} and CRM_DATABASE_URL is not set.`);
+  if (!crmConnectionString && process.env.CRM_ENV_PATH) {
+    const crmEnvPath = process.env.CRM_ENV_PATH;
+    if (fs.existsSync(crmEnvPath)) {
+      const crmEnvContent = fs.readFileSync(crmEnvPath, 'utf8');
+      const parsed = dotenv.parse(crmEnvContent);
+      crmConnectionString = parsed.DATABASE_URL;
+    } else {
+      throw new Error(`CRM .env file not found at ${crmEnvPath}`);
     }
-    const crmEnvContent = fs.readFileSync(crmEnvPath, 'utf8');
-    const parsed = dotenv.parse(crmEnvContent);
-    crmConnectionString = parsed.DATABASE_URL;
   }
 
   if (!crmConnectionString) {
-    throw new Error('DATABASE_URL not found in CRM environment configuration.');
+    throw new Error('CRM_DATABASE_URL environment variable is not defined.');
   }
 
   console.log('Connecting to CRM database in READ-ONLY mode...');

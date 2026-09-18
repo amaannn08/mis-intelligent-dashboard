@@ -47,7 +47,7 @@ constraints and indexes (including an **HNSW cosine index** on `document_chunks.
 
 ### Local database — already provisioned and verified, use it as-is
 ```
-DATABASE_URL=postgresql://mis_app:mis_app_dev@127.0.0.1:5432/mis_dashboard
+DATABASE_URL=postgresql://user:password@127.0.0.1:5432/mis_dashboard
 ```
 (role `mis_app`, database `mis_dashboard`, **pgvector 0.8.6 already enabled** — verified working, including a
 `vector(3)` distance query.) Put that in `apps/web/.env.local` and `packages/db/.env` (both gitignored) and use it

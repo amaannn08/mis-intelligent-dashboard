@@ -1,15 +1,56 @@
 #!/usr/bin/env bash
-# Block any accidental commit of env files or key material.
-blocked=$(git diff --cached --name-only --diff-filter=ACM | grep -E '(^|/)\.env($|\.)|\.(pem|key|p12|pfx)$|credentials\.json$|google-token\.json$' | grep -v '\.env\.example$')
-if [ -n "$blocked" ]; then
-  echo "✖ pre-commit: refusing to commit secret-bearing files:" >&2
-  echo "$blocked" | sed 's/^/    /' >&2
-  echo "  (if this is intentional, use: git commit --no-verify)" >&2
+# =============================================================================
+# Pre-Commit Guard: Zero Sensitive Data In Git
+# Enforces filename policy and content secret scanning before every commit.
+# Activate via: git config core.hooksPath .githooks
+# =============================================================================
+
+set -e
+
+# 1. Block any accidental commit of secret-bearing files by name
+BLOCKED_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '(^|/)\.env($|\.)|\.(pem|key|p12|pfx)$|credentials\.json$|service-account.*\.json$|.*-token\.json$' | grep -v '\.env\.example$' || true)
+
+if [ -n "$BLOCKED_FILES" ]; then
+  echo "" >&2
+  echo "❌ pre-commit: Refusing to commit secret-bearing file(s):" >&2
+  echo "$BLOCKED_FILES" | sed 's/^/   - /' >&2
+  echo "" >&2
+  echo "Actionable Guidance:" >&2
+  echo "  1. Unstage the blocked files:" >&2
+  for f in $BLOCKED_FILES; do
+    echo "     git reset HEAD \"$f\"" >&2
+  done
+  echo "  2. Ensure sensitive values are placed in gitignored .env.local or your private store." >&2
+  echo "  3. Use .env.example with placeholder values for configuration templates." >&2
+  echo "" >&2
   exit 1
 fi
-# Also block long-lived API key patterns in staged content.
-if git diff --cached -U0 | grep -EI '(sk-[a-zA-Z0-9]{20,}|npg_[A-Za-z0-9]{12,}|AIza[0-9A-Za-z_\-]{30,})' >/dev/null 2>&1; then
-  echo "✖ pre-commit: a staged file appears to contain an API key or DB password." >&2
-  exit 1
+
+# 2. Run TypeScript secret scanner against staged content
+# Reuses the full rule set from scripts/scan-secrets.ts (including live env checks)
+if command -v npx >/dev/null 2>&1 && [ -f "scripts/scan-secrets.ts" ]; then
+  if ! npx --no-install tsx scripts/scan-secrets.ts --staged; then
+    echo "" >&2
+    echo "❌ pre-commit: Staged files contain credential-like patterns or live secrets." >&2
+    echo "Actionable Guidance:" >&2
+    echo "  1. Check the matched file:line reported above." >&2
+    echo "  2. Unstage the file with: git reset HEAD <file>" >&2
+    echo "  3. Replace the secret with process.env.VARIABLE and store the value in .env.local." >&2
+    echo "" >&2
+    exit 1
+  fi
+else
+  # Fast fallback in minimal environments where tsx is unavailable
+  STAGED_LEAKS=$(git diff --cached -U0 | grep -EI '(sk-[a-zA-Z0-9]{20,}|AQ\.[a-zA-Z0-9_\-]{20,}|npg_[A-Za-z0-9]{10,}|AIza[0-9A-Za-z_\-]{30,}|(?:gho|ghp|github_pat)_[A-Za-z0-9_]{20,}|-----BEGIN [A-Z0-9 ]+-----)' || true)
+  if [ -n "$STAGED_LEAKS" ]; then
+    echo "" >&2
+    echo "❌ pre-commit: A staged file appears to contain an API key, token, or private key." >&2
+    echo "Actionable Guidance:" >&2
+    echo "  Unstage and move the credentials to environment variables:" >&2
+    echo "     git reset HEAD <file>" >&2
+    echo "" >&2
+    exit 1
+  fi
 fi
+
 exit 0

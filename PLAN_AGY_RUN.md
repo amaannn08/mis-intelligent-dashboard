@@ -22,7 +22,7 @@ The complete, senior-level implementation plan has been derived directly from [`
 ### Questions Only a Human Can Answer
 
 1. **Production Neon Database Connection String**:
-   * Local development is fully configured against PostgreSQL 18.6 with `pgvector` (`postgresql://mis_app:mis_app_dev@127.0.0.1:5432/mis_dashboard`).
+   * Local development is fully configured against PostgreSQL 18.6 with `pgvector` (`postgresql://user:password@127.0.0.1:5432/mis_dashboard`).
    * When promoting to Vercel (Milestone 6), what dedicated Neon connection string should be used for this application? *(Note: It must be distinct from the CRM's database to prevent mixing production deal data with portfolio MIS data).*
 2. **Shared API Key Authorization**:
    * Please confirm that the existing `GEMINI_API_KEY` and `DEEPSEEK_API_KEY` configured locally in the workspace are authorized for use in the dashboard's preview and production deployments.
@@ -58,7 +58,7 @@ No source code was modified, no database migrations were applied, and no git com
 ### Questions Only a Human Can Answer
 
 1. **Production Neon Database URL**:
-   * Local development is fully configured against PostgreSQL 18.6 with `pgvector` (`postgresql://mis_app:mis_app_dev@127.0.0.1:5432/mis_dashboard`).
+   * Local development is fully configured against PostgreSQL 18.6 with `pgvector` (`postgresql://user:password@127.0.0.1:5432/mis_dashboard`).
    * When promoting to Vercel (Milestone 6), what dedicated Neon connection string should be used for this application? *(Note: It must be an isolated database, distinct from the CRM's database, to prevent mixing deal-flow and portfolio MIS data).*
 
 2. **Shared API Key Authorization**:

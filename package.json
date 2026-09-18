@@ -17,7 +17,8 @@
     "db:studio": "npm run db:studio --workspace=@mis/db",
     "db:seed": "npm run db:seed --workspace=@mis/db",
     "db:seed:crm": "npm run db:seed:crm --workspace=@mis/db",
-    "test": "vitest run"
+    "scan:secrets": "tsx scripts/scan-secrets.ts",
+    "test": "npm run scan:secrets && vitest run"
   },
   "devDependencies": {
     "puppeteer-core": "^25.11.0",
