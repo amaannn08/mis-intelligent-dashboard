@@ -23,8 +23,9 @@ const dmMono = DM_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'MIS Intelligence Dashboard',
+  title: 'WEH Ventures · MIS Intelligence',
   description: 'Portfolio MIS Intelligence Dashboard for WEH Ventures',
+  icons: { icon: '/images/icon.png' },
 };
 
 export default function RootLayout({

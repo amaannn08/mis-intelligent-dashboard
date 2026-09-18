@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 'use client';
 
 import * as React from 'react';
@@ -141,17 +142,19 @@ export function AppShell({ children, noPadding = false }: AppShellProps) {
               prefetch
               className="flex items-center gap-3 hover:opacity-85 transition-opacity"
             >
-              <div className="h-7 w-7 rounded-[7px] bg-[#FF7102] text-white flex items-center justify-center font-bold text-xs tracking-wider shadow-sm">
-                W
-              </div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-sm font-semibold tracking-tight text-[#1A1815] dark:text-[#FAFAF8]">
-                  WEH Ventures
-                </span>
-                <span className="hidden sm:inline-block text-[10px] font-medium uppercase tracking-[0.22em] text-[#FF7102] font-mono">
-                  MIS Intelligence
-                </span>
-              </div>
+              <img
+                src="/images/logo-black.svg"
+                alt="WEH Ventures"
+                className="w-24 dark:hidden"
+              />
+              <img
+                src="/images/logo-white.svg"
+                alt="WEH Ventures"
+                className="w-24 hidden dark:block"
+              />
+              <span className="hidden sm:inline-block text-[10px] font-medium uppercase tracking-[0.22em] text-[#FF7102] font-mono">
+                MIS Intelligence
+              </span>
             </Link>
           </div>
 

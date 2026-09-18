@@ -1,149 +1,86 @@
-'use client';
-
-import * as React from 'react';
+/* eslint-disable @next/next/no-img-element */
 import { Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { db, companies } from '@mis/db';
+import { sql } from 'drizzle-orm';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
-import { Lock, ArrowRight, AlertCircle, Loader2 } from 'lucide-react';
+import { LoginForm } from './login-form';
 
-function LoginForm() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const from = searchParams.get('from') || '/';
+export const dynamic = 'force-dynamic';
 
-  const [username, setUsername] = React.useState('');
-  const [password, setPassword] = React.useState('');
-  const [error, setError] = React.useState<string | null>(null);
-  const [isLoading, setIsLoading] = React.useState(false);
-
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!username || !password) {
-      setError('Please provide both username and password.');
-      return;
+async function getCompanyCount(): Promise<number | null> {
+  try {
+    const [result] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(companies)
+      .where(sql`archived_at IS NULL`);
+    if (typeof result?.count === 'number' && Number.isFinite(result.count)) {
+      return result.count;
     }
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error?.message || 'Invalid credentials. Please try again.');
-        return;
-      }
-
-      // Success: redirect to destination
-      router.push(from);
-      router.refresh();
-    } catch {
-      setError('Network error occurred during login. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      {error && (
-        <div
-          role="alert"
-          className="flex items-start gap-2.5 p-3 rounded-lg border border-destructive/20 bg-destructive/10 text-destructive text-xs animate-in fade-in"
-        >
-          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <span className="leading-tight">{error}</span>
-        </div>
-      )}
-
-      <Input
-        label="Username"
-        id="username"
-        type="text"
-        autoFocus
-        autoComplete="username"
-        required
-        value={username}
-        onChange={(e) => setUsername(e.target.value)}
-        placeholder="e.g. wehcrm"
-        disabled={isLoading}
-      />
-
-      <Input
-        label="Password"
-        id="password"
-        type="password"
-        autoComplete="current-password"
-        required
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        placeholder="••••••••"
-        disabled={isLoading}
-      />
-
-      <Button
-        type="submit"
-        className="w-full mt-2 font-medium"
-        disabled={isLoading}
-      >
-        {isLoading ? (
-          <>
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            <span>Verifying credentials…</span>
-          </>
-        ) : (
-          <>
-            <span>Sign In</span>
-            <ArrowRight className="w-4 h-4 ml-2" />
-          </>
-        )}
-      </Button>
-    </form>
-  );
+  } catch (err) {
+    console.error('Failed to query company count for login page:', err);
+  }
+  return null;
 }
 
-export default function LoginPage() {
+export default async function LoginPage() {
+  const companyCount = await getCompanyCount();
+
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-background text-foreground relative selection:bg-primary/10">
+    <div className="min-h-screen bg-[#FAFAF8] dark:bg-[#141210] text-[#1A1815] dark:text-[#FAFAF8] px-4 py-8 flex items-center justify-center relative selection:bg-[#FF7102]/10">
       {/* Top right theme toggle */}
-      <div className="absolute top-4 right-4">
+      <div className="absolute top-4 right-4 sm:top-6 sm:right-6">
         <ThemeToggle />
       </div>
 
-      <div className="w-full max-w-sm space-y-6">
-        {/* Terminal Header */}
-        <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-primary text-primary-foreground shadow-sm mb-1 font-bold text-lg">
-            MIS
+      <div className="w-full max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-10 md:gap-12">
+        {/* Left block */}
+        <div className="space-y-4 text-left w-full max-w-md md:max-w-lg">
+          <div>
+            <img
+              src="/images/logo-black.svg"
+              alt="WEH Ventures"
+              className="w-32 h-auto mb-3 dark:hidden"
+            />
+            <img
+              src="/images/logo-white.svg"
+              alt="WEH Ventures"
+              className="w-32 h-auto mb-3 hidden dark:block"
+            />
+            <div className="text-[10px] font-mono uppercase tracking-[0.3em] text-[#FF7102]">
+              MIS INTELLIGENCE
+            </div>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">
-            Portfolio Intelligence
+
+          <h1 className="font-serif text-[34px] sm:text-[40px] leading-[1.2] text-[#1A1815] dark:text-[#FAFAF8]">
+            Sign in to Access
+            <br />
+            <span className="text-[#FF7102]">MIS INTELLIGENCE</span>
           </h1>
-          <p className="text-xs text-muted-foreground">
-            Sign in with your team credentials to access portfolio MIS data
+
+          <div className="h-px w-24 bg-[#D4CFC4] dark:bg-[#2E2A24]" />
+
+          <p className="max-w-md text-[13px] leading-relaxed text-[#5A5650] dark:text-[#9A958E]">
+            Secure access to the WEH Ventures portfolio MIS intelligence dashboard — every filed MIS, indexed and answerable.
           </p>
+
+          {companyCount !== null && (
+            <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-[#9A958E] dark:text-[#C8C3BB]">
+              {companyCount} PORTFOLIO COMPANIES TRACKED
+            </div>
+          )}
         </div>
 
-        {/* Login Form Card */}
-        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
-          <Suspense fallback={<div className="h-44 flex items-center justify-center text-xs text-muted-foreground">Loading login form…</div>}>
+        {/* Right block - Login Card */}
+        <div className="w-full max-w-sm shrink-0">
+          <Suspense
+            fallback={
+              <div className="h-64 flex items-center justify-center text-xs text-[#9A958E] font-mono rounded-2xl border border-[#E8E5DE] dark:border-[#2E2A24] bg-white dark:bg-[#1C1A17]">
+                Loading…
+              </div>
+            }
+          >
             <LoginForm />
           </Suspense>
-
-          <div className="mt-5 pt-4 border-t border-border/60 text-center">
-            <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1.5">
-              <Lock className="w-3 h-3 text-muted-foreground/80" />
-              Secured team authentication
-            </span>
-          </div>
         </div>
       </div>
     </div>
