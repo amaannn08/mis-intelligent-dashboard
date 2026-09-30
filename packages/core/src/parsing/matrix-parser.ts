@@ -298,6 +298,15 @@ export function parseMatrixSpreadsheet(
     const sheetText = `${sheetName} ${rows.slice(0, 5).map((r) => (Array.isArray(r) ? r.join(' ') : '')).join(' ')}`;
     const sheetScale = detectScaleAndCurrency(sheetText);
 
+    // Check if sheetName has explicit year (e.g. 'till March 23' -> 2023, 'FY25' -> 2025)
+    let sheetYear = yearFromFilename;
+    const sheetYearMatch = sheetName.match(/\b(?:till|to|fy|ended)?\s*([a-zA-Z]{3,9})?\s*'?((?:20)?2[0-9])\b/i);
+    if (sheetYearMatch && sheetYearMatch[2]) {
+      let y = parseInt(sheetYearMatch[2], 10);
+      if (y < 100) y += 2000;
+      sheetYear = y;
+    }
+
     let dateRowIndex = -1;
     let periodColumns: Array<{ colIndex: number; period: string; label: string }> = [];
 
@@ -308,9 +317,27 @@ export function parseMatrixSpreadsheet(
 
       for (let c = 0; c < row.length; c++) {
         const cell = row[c];
-        const period = parseReportingPeriodCell(cell, yearFromFilename);
+        const period = parseReportingPeriodCell(cell, sheetYear);
         if (period) {
           candidates.push({ colIndex: c, period, label: String(cell).trim() });
+        }
+      }
+
+      // If candidates are derived from bare months and wrap across calendar years, adjust years backwards
+      const hasBareMonths = candidates.some((c) => /^[a-zA-Z]{3,9}$/.test(c.label));
+      if (hasBareMonths && candidates.length >= 2) {
+        let currentY = sheetYear ?? yearFromFilename ?? 2026;
+        for (let i = candidates.length - 1; i >= 0; i--) {
+          const curr = candidates[i]!;
+          const prev = i > 0 ? candidates[i - 1] : null;
+          const currMonth = parseInt(curr.period.split('-')[1]!, 10);
+          candidates[i]!.period = `${currentY}-${String(currMonth).padStart(2, '0')}`;
+          if (prev) {
+            const prevMonth = parseInt(prev.period.split('-')[1]!, 10);
+            if (prevMonth > currMonth) {
+              currentY--;
+            }
+          }
         }
       }
 
@@ -320,7 +347,7 @@ export function parseMatrixSpreadsheet(
         const nextRow = Array.isArray(rows[r + 1]) ? (rows[r + 1] as unknown[]) : [];
         const nextCandidates: Array<{ colIndex: number; period: string; label: string }> = [];
         for (let c = 0; c < nextRow.length; c++) {
-          const nextPeriod = parseReportingPeriodCell(nextRow[c], yearFromFilename);
+          const nextPeriod = parseReportingPeriodCell(nextRow[c], sheetYear);
           if (nextPeriod) nextCandidates.push({ colIndex: c, period: nextPeriod, label: String(nextRow[c]).trim() });
         }
 
@@ -482,3 +509,30 @@ export function parseMatrixSpreadsheet(
     quarantinedCount,
   };
 }
+
+/**
+ * Extract canonical reporting period (YYYY-MM) from document filename if present.
+ */
+export function extractPeriodFromFilename(filename: string): string | null {
+  const clean = filename.replace(/[_\s.]+/g, ' ');
+  const myMatch = clean.match(/\b([a-zA-Z]{3,9})\s*'?((?:20)?2[0-9])\b/i);
+  if (myMatch && myMatch[1] && myMatch[2]) {
+    const m = MONTH_MAP[myMatch[1].toLowerCase()];
+    if (m) {
+      let y = parseInt(myMatch[2], 10);
+      if (y < 100) y += 2000;
+      return `${y}-${m}`;
+    }
+  }
+  const qMatch = clean.match(/\bQ([1-4])\s*[-/]?\s*FY\s*'?([0-9]{2,4})\b/i);
+  if (qMatch && qMatch[1] && qMatch[2]) {
+    const q = parseInt(qMatch[1], 10);
+    let y = parseInt(qMatch[2], 10);
+    if (y < 100) y += 2000;
+    const months = ['06', '09', '12', '03'];
+    const retY = q === 4 ? y : y - 1;
+    return `${retY}-${months[q - 1]}`;
+  }
+  return null;
+}
+

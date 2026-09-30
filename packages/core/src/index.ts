@@ -14,6 +14,12 @@ export {
   parsePdf,
   parseDocx,
   parseMatrixSpreadsheet,
+  parseReportingPeriodCell,
+  detectScaleAndCurrency,
+  parseRawCellValue,
+  normalizeLabel,
+  matchStandardKpi,
+  extractPeriodFromFilename,
 } from './parsing/index.js';
 
 // Normalisation

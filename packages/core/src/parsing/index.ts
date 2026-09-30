@@ -13,6 +13,7 @@ export {
   parseRawCellValue,
   normalizeLabel,
   matchStandardKpi,
+  extractPeriodFromFilename,
 } from './matrix-parser.js';
 
 /**

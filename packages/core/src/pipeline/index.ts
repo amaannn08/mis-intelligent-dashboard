@@ -12,8 +12,7 @@ import {
   documentBlobs,
   misMetrics,
 } from '@mis/db';
-import type { PipelineResult, ExtractedMetric, ParsedMatrixMetric } from '../types.js';
-import { parseFile, parseMatrixSpreadsheet } from '../parsing/index.js';
+import { parseFile, parseMatrixSpreadsheet, extractPeriodFromFilename } from '../parsing/index.js';
 import { extractMetrics } from '../extraction/index.js';
 import { chunkDocument } from '../chunking/index.js';
 import { embedTexts, type EmbedOptions } from '../embeddings/index.js';
@@ -278,28 +277,29 @@ export async function processDocument(
       }
     }
 
-    const defs = await db.select().from(metricDefinitions);
-    const fallbackMetrics: ExtractedMetric[] = await extractMetrics(
-      parsed,
-      defs,
-      doc.reportingPeriod || undefined
-    );
+    let extractedMetrics: ExtractedMetric[] = [];
+    if (matrixExtractedKpis.length > 0) {
+      extractedMetrics = matrixExtractedKpis;
+    } else {
+      const defs = await db.select().from(metricDefinitions);
+      const fallbackMetrics: ExtractedMetric[] = await extractMetrics(
+        parsed,
+        defs,
+        doc.reportingPeriod || undefined
+      );
+      extractedMetrics = fallbackMetrics;
+    }
 
-    // Merge: matrix parser standard KPIs take priority over fallback regex/LLM
-    const mergedMap = new Map<string, ExtractedMetric>();
-    for (const fm of fallbackMetrics) {
-      mergedMap.set(`${fm.metricKey}_${fm.reportingPeriod}`, fm);
-    }
-    for (const mm of matrixExtractedKpis) {
-      mergedMap.set(`${mm.metricKey}_${mm.reportingPeriod}`, mm);
-    }
-    const extractedMetrics = Array.from(mergedMap.values());
+    // Filter to ensure only strictly valid YYYY-MM periods are persisted to metrics
+    const validExtractedMetrics = extractedMetrics.filter(
+      (m) => m.reportingPeriod && /^\d{4}-\d{2}$/.test(m.reportingPeriod)
+    );
 
     // Clean up existing metrics for this document for idempotency
     await db.delete(metrics).where(eq(metrics.documentId, documentId));
 
     // Persist extracted metrics to database
-    for (const m of extractedMetrics) {
+    for (const m of validExtractedMetrics) {
       await db
         .insert(metrics)
         .values({
@@ -332,10 +332,10 @@ export async function processDocument(
     }
 
     await completeJob({
-      metricsExtractedCount: extractedMetrics.length,
+      metricsExtractedCount: validExtractedMetrics.length,
       granularMisMetricsCount,
       quarantinedCount,
-      metrics: extractedMetrics.map((m) => ({
+      metrics: validExtractedMetrics.map((m) => ({
         key: m.metricKey,
         value: m.value,
         period: m.reportingPeriod,
@@ -343,11 +343,11 @@ export async function processDocument(
       })),
     });
 
-    // Determine canonical reporting period from extracted metrics if document lacks one
-    let canonicalPeriod = doc.reportingPeriod;
-    if (!canonicalPeriod && extractedMetrics.length > 0) {
-      // Pick the most recent period among extracted metrics
-      const periods = extractedMetrics.map((m) => m.reportingPeriod).sort();
+    // Determine canonical reporting period: filename period has highest priority!
+    const filenamePeriod = extractPeriodFromFilename(doc.filename);
+    let canonicalPeriod = doc.reportingPeriod || filenamePeriod;
+    if (!canonicalPeriod && validExtractedMetrics.length > 0) {
+      const periods = validExtractedMetrics.map((m) => m.reportingPeriod).sort();
       canonicalPeriod = periods[periods.length - 1] ?? null;
     }
 
@@ -378,12 +378,20 @@ export async function processDocument(
       .delete(documentChunks)
       .where(eq(documentChunks.documentId, documentId));
 
-    if (chunks.length > 0) {
-      const textsToEmbed = chunks.map((c) => c.content);
-      const embeddings = await embedTexts(textsToEmbed, options.embedOptions);
+    // Limit embedding to first 50 representative chunks to avoid API exhaustion on massive sheets
+    const MAX_EMBED_CHUNKS = 50;
+    const chunksToEmbed = chunks.slice(0, MAX_EMBED_CHUNKS);
 
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i]!;
+    if (chunksToEmbed.length > 0) {
+      const textsToEmbed = chunksToEmbed.map((c) => c.content);
+      const embeddings = await embedTexts(textsToEmbed, {
+        batchSize: 25,
+        delayMs: 250,
+        ...options.embedOptions,
+      });
+
+      for (let i = 0; i < chunksToEmbed.length; i++) {
+        const chunk = chunksToEmbed[i]!;
         const vector = embeddings[i]!;
 
         await db.insert(documentChunks).values({
@@ -398,7 +406,7 @@ export async function processDocument(
       }
     }
 
-    await completeJob({ embeddedChunksCount: chunks.length });
+    await completeJob({ embeddedChunksCount: chunksToEmbed.length });
 
     // --- STEP 5: PROCESSED ---
     await db
