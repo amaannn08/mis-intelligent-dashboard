@@ -8,7 +8,12 @@ export const CORE_VERSION = '0.1.0';
 export * from './types.js';
 
 // Parsing
-export { parseFile, parseXlsx, parsePdf } from './parsing/index.js';
+export {
+  parseFile,
+  parseXlsx,
+  parsePdf,
+  parseMatrixSpreadsheet,
+} from './parsing/index.js';
 
 // Normalisation
 export {

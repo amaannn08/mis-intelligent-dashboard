@@ -4,6 +4,14 @@ import { parsePdf } from './pdf.js';
 
 export { parseXlsx } from './xlsx.js';
 export { parsePdf } from './pdf.js';
+export {
+  parseMatrixSpreadsheet,
+  parseReportingPeriodCell,
+  detectScaleAndCurrency,
+  parseRawCellValue,
+  normalizeLabel,
+  matchStandardKpi,
+} from './matrix-parser.js';
 
 /**
  * Parse a file (.xlsx, .xls, or .pdf) into a structured ParsedDocument with blocks.

@@ -85,3 +85,31 @@ export interface PipelineResult {
   metricsExtracted: ExtractedMetric[];
   error?: string;
 }
+
+export interface ParsedMatrixMetric {
+  sheetName: string;
+  rawLabel: string;
+  normalizedLabel: string;
+  parentLabel?: string;
+  standardMetricKey?: string;
+  reportingPeriod: string;
+  periodDate?: string;
+  granularity: 'monthly' | 'quarterly' | 'annual';
+  value: number | null;
+  rawValue: string;
+  unit: string;
+  currency?: string;
+  scale: 'units' | 'lakh' | 'crore' | 'thousand' | 'million';
+  rowIndex: number;
+  colIndex: number;
+  sourceReference: string;
+  confidence: number;
+  status: 'valid' | 'quarantined' | 'derived';
+  validationNotes?: string;
+}
+
+export interface MatrixParseResult {
+  metrics: ParsedMatrixMetric[];
+  sheetsAnalyzed: string[];
+  quarantinedCount: number;
+}
