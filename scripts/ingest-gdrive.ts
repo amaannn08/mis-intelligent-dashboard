@@ -440,10 +440,16 @@ export async function runIngestion(options: IngestOptions) {
             }
           }
 
-          await db.insert(documents).values({
+          const uploadsDir = path.resolve(process.cwd(), 'uploads');
+          fs.mkdirSync(uploadsDir, { recursive: true });
+          const safeZipFilename = downloaded.filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+          const zipDiskPath = path.join(uploadsDir, `${file.id}_${safeZipFilename}`);
+          fs.writeFileSync(zipDiskPath, downloaded.buffer);
+
+          const [zipDoc] = await db.insert(documents).values({
             companyId: company.id,
             filename: downloaded.filename,
-            storagePath: `drive://${file.id}/${downloaded.filename}`,
+            storagePath: zipDiskPath,
             blobUrl: zipBlobUrl,
             mime: 'application/zip',
             fileType: 'zip',
@@ -455,7 +461,27 @@ export async function runIngestion(options: IngestOptions) {
             driveFolderPath: file.folderPath,
             isOldMis: file.isOldMis,
             originalRetained: true,
-          }).onConflictDoNothing();
+          }).onConflictDoUpdate({
+            target: [documents.companyId, documents.checksum],
+            set: { storagePath: zipDiskPath, updatedAt: new Date(), status: 'processed' },
+          }).returning();
+
+          if (zipDoc) {
+            await db
+              .insert(documentBlobs)
+              .values({
+                documentId: zipDoc.id,
+                data: downloaded.buffer,
+                sizeBytes: downloaded.buffer.length,
+              })
+              .onConflictDoUpdate({
+                target: documentBlobs.documentId,
+                set: {
+                  data: downloaded.buffer,
+                  sizeBytes: downloaded.buffer.length,
+                },
+              });
+          }
 
           // Ingest nested xlsx files
           for (const nestedName of extractedFiles) {
@@ -477,10 +503,14 @@ export async function runIngestion(options: IngestOptions) {
               }
             }
 
+            const safeNestedName = nestedName.replace(/[^a-zA-Z0-9._-]/g, '_');
+            const nestedDiskPath = path.join(uploadsDir, `${file.id}_${safeNestedName}`);
+            fs.writeFileSync(nestedDiskPath, nestedBytes);
+
             const [nestedDoc] = await db.insert(documents).values({
               companyId: company.id,
               filename: nestedName,
-              storagePath: `drive://${file.id}/${nestedName}`,
+              storagePath: nestedDiskPath,
               blobUrl: nestedBlobUrl,
               mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
               fileType: 'xlsx',
@@ -494,10 +524,25 @@ export async function runIngestion(options: IngestOptions) {
               originalRetained: true,
             }).onConflictDoUpdate({
               target: [documents.companyId, documents.checksum],
-              set: { updatedAt: new Date(), status: 'pending' },
+              set: { updatedAt: new Date(), status: 'pending', storagePath: nestedDiskPath },
             }).returning();
 
             if (nestedDoc) {
+              await db
+                .insert(documentBlobs)
+                .values({
+                  documentId: nestedDoc.id,
+                  data: nestedBytes,
+                  sizeBytes: nestedBytes.length,
+                })
+                .onConflictDoUpdate({
+                  target: documentBlobs.documentId,
+                  set: {
+                    data: nestedBytes,
+                    sizeBytes: nestedBytes.length,
+                  },
+                });
+
               console.log(`${prefix} ⚙️ Processing nested: ${nestedName}...`);
               await processDocument(nestedDoc.id);
             }
@@ -529,13 +574,20 @@ export async function runIngestion(options: IngestOptions) {
         }
       }
 
+      // Ensure local uploads directory mirror
+      const uploadsDir = path.resolve(process.cwd(), 'uploads');
+      fs.mkdirSync(uploadsDir, { recursive: true });
+      const safeFilename = downloaded.filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const diskPath = path.join(uploadsDir, `${file.id}_${safeFilename}`);
+      fs.writeFileSync(diskPath, downloaded.buffer);
+
       // 4. Upsert document record
       const [doc] = await db
         .insert(documents)
         .values({
           companyId: company.id,
           filename: downloaded.filename,
-          storagePath: `drive://${file.id}/${downloaded.filename}`,
+          storagePath: diskPath,
           blobUrl,
           blobPathname,
           mime: downloaded.mimeType,
@@ -556,6 +608,7 @@ export async function runIngestion(options: IngestOptions) {
             driveFileId: file.id,
             driveFolderPath: file.folderPath,
             isOldMis: file.isOldMis,
+            storagePath: diskPath,
             blobUrl: blobUrl ?? documents.blobUrl,
             blobPathname: blobPathname ?? documents.blobPathname,
             originalRetained: true,
@@ -568,17 +621,21 @@ export async function runIngestion(options: IngestOptions) {
         throw new Error(`Failed to create or retrieve document record for ${file.name}`);
       }
 
-      // Store in document_blobs if <= 4MB as legacy fallback
-      if (downloaded.buffer.length <= 4 * 1024 * 1024) {
-        await db
-          .insert(documentBlobs)
-          .values({
-            documentId: doc.id,
+      // Store in document_blobs regardless of size as reliable fallback
+      await db
+        .insert(documentBlobs)
+        .values({
+          documentId: doc.id,
+          data: downloaded.buffer,
+          sizeBytes: downloaded.buffer.length,
+        })
+        .onConflictDoUpdate({
+          target: documentBlobs.documentId,
+          set: {
             data: downloaded.buffer,
             sizeBytes: downloaded.buffer.length,
-          })
-          .onConflictDoNothing();
-      }
+          },
+        });
 
       // 5. Run full pipeline (matrix parsing + standard KPIs + chunk + embed)
       console.log(`${prefix} ⚙️ Running processing pipeline on doc ${doc.id}...`);
