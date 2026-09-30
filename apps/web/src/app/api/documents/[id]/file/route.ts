@@ -52,16 +52,15 @@ export async function GET(
       }
     }
 
-    if (!detail.document.originalRetained) {
-      return apiError(
-        'FILE_NOT_RETAINED',
-        'Original file was larger than 4 MB and was not retained in database storage. Parsed data and metrics are available.',
-        404
-      );
-    }
-
     const binaryData = await getDocumentBinary(id);
     if (!binaryData) {
+      if (!detail.document.originalRetained) {
+        return apiError(
+          'FILE_NOT_RETAINED',
+          'Original file was larger than 4 MB and was not retained in database storage. Parsed data and metrics are available.',
+          404
+        );
+      }
       return apiError(
         'NOT_FOUND',
         'Original file binary was not found in database or local storage.',

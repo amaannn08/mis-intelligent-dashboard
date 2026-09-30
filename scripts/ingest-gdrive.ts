@@ -6,23 +6,75 @@ import { execFileSync } from 'node:child_process';
 import dotenv from 'dotenv';
 import { put } from '@vercel/blob';
 import { eq, and } from 'drizzle-orm';
-import {
-  db,
-  companies,
-  documents,
-  documentBlobs,
-  misMetrics,
-  metrics,
-  type Company,
-} from '../packages/db/src/index.js';
-import { processDocument } from '../packages/core/src/pipeline/index.js';
+import type { Company } from '../packages/db/src/index.js';
 
-// Load environment variables from apps/web/.env.local and root .env
-for (const envFile of ['apps/web/.env.local', 'packages/db/.env', '.env']) {
-  const resolved = path.resolve(process.cwd(), envFile);
-  if (fs.existsSync(resolved)) {
-    dotenv.config({ path: resolved });
+function maskUrl(conn: string): string {
+  try {
+    const u = new URL(conn);
+    return `${u.protocol}//${u.username ? u.username + ':***@' : ''}${u.host}${u.pathname}`;
+  } catch {
+    return '***masked***';
   }
+}
+
+function setupEnvironmentAndDb(target: 'prod' | 'local'): {
+  connectionString: string;
+  maskedHost: string;
+} {
+  const hermesPath = '/home/amann/.hermes/private/mis-secrets.env';
+  let hermesEnv: Record<string, string> = {};
+  if (fs.existsSync(hermesPath)) {
+    hermesEnv = dotenv.parse(fs.readFileSync(hermesPath, 'utf8'));
+  }
+
+  let connectionString: string | undefined;
+
+  if (target === 'prod') {
+    connectionString = process.env.MIS_PROD_DATABASE_URL || hermesEnv.MIS_PROD_DATABASE_URL;
+    if (!connectionString) {
+      throw new Error(
+        'Production target requested, but MIS_PROD_DATABASE_URL is not set in environment or /home/amann/.hermes/private/mis-secrets.env. Aborting.'
+      );
+    }
+    process.env.DATABASE_URL = connectionString;
+    process.env.TARGET_ENV = 'prod';
+
+    if (hermesEnv.MIS_GEMINI_API_KEY && !process.env.GEMINI_API_KEY) {
+      process.env.GEMINI_API_KEY = hermesEnv.MIS_GEMINI_API_KEY;
+    }
+    if (hermesEnv.MIS_DEEPSEEK_API_KEY && !process.env.DEEPSEEK_API_KEY) {
+      process.env.DEEPSEEK_API_KEY = hermesEnv.MIS_DEEPSEEK_API_KEY;
+    }
+    if (hermesEnv.MIS_BLOB_READ_WRITE_TOKEN && !process.env.BLOB_READ_WRITE_TOKEN) {
+      process.env.BLOB_READ_WRITE_TOKEN = hermesEnv.MIS_BLOB_READ_WRITE_TOKEN;
+    }
+  } else {
+    process.env.TARGET_ENV = 'local';
+    for (const envFile of ['apps/web/.env.local', 'packages/db/.env', '.env']) {
+      const resolved = path.resolve(process.cwd(), envFile);
+      if (fs.existsSync(resolved)) {
+        dotenv.config({ path: resolved });
+        if (process.env.DATABASE_URL) break;
+      }
+    }
+    connectionString = process.env.DATABASE_URL || hermesEnv.MIS_DEV_DATABASE_URL;
+    if (!connectionString) {
+      throw new Error(
+        'Local target requested, but DATABASE_URL is not set in environment or .env.local.'
+      );
+    }
+    process.env.DATABASE_URL = connectionString;
+  }
+
+  let maskedHost = 'unknown';
+  try {
+    const u = new URL(connectionString);
+    maskedHost = `${u.host}${u.pathname}`;
+  } catch {
+    maskedHost = '***masked***';
+  }
+
+  return { connectionString, maskedHost };
 }
 
 const SHARED_DRIVE_ID = '0AERIfhS-cDCcUk9PVA';
@@ -43,6 +95,7 @@ interface DriveFile {
 
 interface IngestOptions {
   dryRun: boolean;
+  target?: 'prod' | 'local';
   limit?: number;
   fund?: string;
   company?: string;
@@ -278,15 +331,26 @@ async function downloadDriveFile(
 }
 
 export async function runIngestion(options: IngestOptions) {
+  const target = options.target || 'prod';
+  const { maskedHost } = setupEnvironmentAndDb(target);
+
   console.log('='.repeat(70));
   console.log('Starting Google Drive Shared-Drive Ingestion Pipeline');
-  console.log(`Root Folder: ${ROOT_FOLDER_ID}`);
-  console.log(`Shared Drive: ${SHARED_DRIVE_ID}`);
-  console.log(`Dry Run: ${options.dryRun}`);
-  if (options.limit) console.log(`Limit: ${options.limit}`);
-  if (options.fund) console.log(`Filter Fund: ${options.fund}`);
-  if (options.company) console.log(`Filter Company: ${options.company}`);
+  console.log(`Database Target: ${target.toUpperCase()}`);
+  console.log(`Database Host:   ${maskedHost}`);
+  console.log(`Root Folder:     ${ROOT_FOLDER_ID}`);
+  console.log(`Shared Drive:    ${SHARED_DRIVE_ID}`);
+  console.log(`Dry Run:         ${options.dryRun}`);
+  if (options.limit) console.log(`Limit:           ${options.limit}`);
+  if (options.fund) console.log(`Filter Fund:     ${options.fund}`);
+  if (options.company) console.log(`Filter Company:  ${options.company}`);
   console.log('='.repeat(70));
+
+  const { db, companies, documents, documentBlobs, misMetrics, metrics } = await import(
+    '../packages/db/src/index.js'
+  );
+  const { processDocument } = await import('../packages/core/src/pipeline/index.js');
+  const { extractPeriodFromFilename } = await import('../packages/core/src/index.js');
 
   const allCompanies = await db.select().from(companies);
   const companyBySlug = new Map<string, Company>();
@@ -428,15 +492,17 @@ export async function runIngestion(options: IngestOptions) {
 
           // Ingest original zip as a document record
           let zipBlobUrl: string | null = null;
-          if (process.env.BLOB_READ_WRITE_TOKEN) {
+          const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
+          if (blobToken && !blobToken.includes('placeholder')) {
             try {
               const zipBlob = await put(`mis-drive/${company.slug}/${downloaded.filename}`, downloaded.buffer, {
                 access: 'public',
-                token: process.env.BLOB_READ_WRITE_TOKEN,
+                token: blobToken,
               });
               zipBlobUrl = zipBlob.url;
-            } catch (err) {
-              console.warn(`${prefix} Blob put failed for zip:`, err);
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : String(err);
+              console.warn(`${prefix} ⚠️ Vercel Blob upload skipped/failed for zip (${msg}). Continuing with document_blobs bytea & disk mirror fallback.`);
             }
           }
 
@@ -453,6 +519,7 @@ export async function runIngestion(options: IngestOptions) {
             blobUrl: zipBlobUrl,
             mime: 'application/zip',
             fileType: 'zip',
+            reportingPeriod: extractPeriodFromFilename(downloaded.filename),
             sizeBytes: downloaded.buffer.length,
             checksum: sha256,
             status: 'processed',
@@ -463,7 +530,12 @@ export async function runIngestion(options: IngestOptions) {
             originalRetained: true,
           }).onConflictDoUpdate({
             target: [documents.companyId, documents.checksum],
-            set: { storagePath: zipDiskPath, updatedAt: new Date(), status: 'processed' },
+            set: {
+              storagePath: zipDiskPath,
+              reportingPeriod: extractPeriodFromFilename(downloaded.filename),
+              updatedAt: new Date(),
+              status: 'processed'
+            },
           }).returning();
 
           if (zipDoc) {
@@ -491,15 +563,16 @@ export async function runIngestion(options: IngestOptions) {
             const nestedSha = crypto.createHash('sha256').update(nestedBytes).digest('hex');
 
             let nestedBlobUrl: string | null = null;
-            if (process.env.BLOB_READ_WRITE_TOKEN) {
+            if (blobToken && !blobToken.includes('placeholder')) {
               try {
                 const b = await put(`mis-drive/${company.slug}/${nestedName}`, nestedBytes, {
                   access: 'public',
-                  token: process.env.BLOB_READ_WRITE_TOKEN,
+                  token: blobToken,
                 });
                 nestedBlobUrl = b.url;
-              } catch (e) {
-                console.warn(`${prefix} Blob put failed for nested xlsx:`, e);
+              } catch (e: unknown) {
+                const msg = e instanceof Error ? e.message : String(e);
+                console.warn(`${prefix} ⚠️ Vercel Blob upload skipped/failed for nested file (${msg}). Continuing with document_blobs bytea & disk mirror fallback.`);
               }
             }
 
@@ -514,6 +587,7 @@ export async function runIngestion(options: IngestOptions) {
               blobUrl: nestedBlobUrl,
               mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
               fileType: 'xlsx',
+              reportingPeriod: extractPeriodFromFilename(nestedName),
               sizeBytes: nestedBytes.length,
               checksum: nestedSha,
               status: 'pending',
@@ -524,7 +598,12 @@ export async function runIngestion(options: IngestOptions) {
               originalRetained: true,
             }).onConflictDoUpdate({
               target: [documents.companyId, documents.checksum],
-              set: { updatedAt: new Date(), status: 'pending', storagePath: nestedDiskPath },
+              set: {
+                updatedAt: new Date(),
+                status: 'pending',
+                storagePath: nestedDiskPath,
+                reportingPeriod: extractPeriodFromFilename(nestedName),
+              },
             }).returning();
 
             if (nestedDoc) {
@@ -559,18 +638,22 @@ export async function runIngestion(options: IngestOptions) {
       let blobUrl: string | null = null;
       let blobPathname: string | null = null;
 
-      if (process.env.BLOB_READ_WRITE_TOKEN) {
+      const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
+      if (blobToken && !blobToken.includes('placeholder')) {
         try {
           const blobPath = `mis-drive/${company.slug}/${downloaded.filename}`;
           const blobResult = await put(blobPath, downloaded.buffer, {
             access: 'public',
-            token: process.env.BLOB_READ_WRITE_TOKEN,
+            token: blobToken,
           });
           blobUrl = blobResult.url;
           blobPathname = blobResult.pathname;
           console.log(`${prefix} ☁️ Uploaded to Vercel Blob: ${blobUrl}`);
-        } catch (blobErr) {
-          console.warn(`${prefix} ⚠️ Blob upload failed, proceeding with local fallback:`, blobErr);
+        } catch (blobErr: unknown) {
+          const msg = blobErr instanceof Error ? blobErr.message : String(blobErr);
+          console.warn(
+            `${prefix} ⚠️ Vercel Blob upload skipped/failed (${msg}). Continuing with document_blobs bytea & disk mirror fallback.`
+          );
         }
       }
 
@@ -592,6 +675,7 @@ export async function runIngestion(options: IngestOptions) {
           blobPathname,
           mime: downloaded.mimeType,
           fileType: path.extname(downloaded.filename).replace('.', '').toLowerCase() || 'unknown',
+          reportingPeriod: extractPeriodFromFilename(downloaded.filename),
           sizeBytes: downloaded.buffer.length,
           checksum: sha256,
           status: 'pending',
@@ -609,6 +693,7 @@ export async function runIngestion(options: IngestOptions) {
             driveFolderPath: file.folderPath,
             isOldMis: file.isOldMis,
             storagePath: diskPath,
+            reportingPeriod: extractPeriodFromFilename(downloaded.filename),
             blobUrl: blobUrl ?? documents.blobUrl,
             blobPathname: blobPathname ?? documents.blobPathname,
             originalRetained: true,
@@ -705,6 +790,16 @@ if (process.argv[1]?.includes('ingest-gdrive')) {
   const args = process.argv.slice(2);
   const dryRun = args.includes('--dry-run');
 
+  let target: 'prod' | 'local' = 'prod';
+  const targetArg = args.find((a) => a.startsWith('--target='));
+  if (targetArg) {
+    target = targetArg.split('=')[1]!.toLowerCase() as 'prod' | 'local';
+  } else if (args.includes('--local')) {
+    target = 'local';
+  } else if (args.includes('--prod')) {
+    target = 'prod';
+  }
+
   const limitArg = args.find((a) => a.startsWith('--limit='));
   let limit: number | undefined;
   if (limitArg) {
@@ -738,7 +833,7 @@ if (process.argv[1]?.includes('ingest-gdrive')) {
     }
   }
 
-  runIngestion({ dryRun, limit, fund, company })
+  runIngestion({ dryRun, target, limit, fund, company })
     .then(() => process.exit(0))
     .catch((err) => {
       console.error('Fatal Ingestion Error:', err);

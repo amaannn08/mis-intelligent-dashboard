@@ -16,6 +16,7 @@ import { parseFile, parseMatrixSpreadsheet, extractPeriodFromFilename } from '..
 import { extractMetrics } from '../extraction/index.js';
 import { chunkDocument } from '../chunking/index.js';
 import { embedTexts, type EmbedOptions } from '../embeddings/index.js';
+import type { PipelineResult, ExtractedMetric, ParsedMatrixMetric } from '../types.js';
 
 export interface ProcessDocumentOptions {
   embedOptions?: EmbedOptions;
