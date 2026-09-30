@@ -29,6 +29,13 @@
       "when": 1789600000000,
       "tag": "0003_add_document_blob_url",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789700000000,
+      "tag": "0004_add_mis_bulk_ingest_tables",
+      "breakpoints": true
     }
   ]
 }
