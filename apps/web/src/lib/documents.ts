@@ -313,7 +313,7 @@ export async function getDocumentDetail(id: string): Promise<DocumentDetail | nu
     document: doc,
     jobs,
     metrics: extractedMetrics,
-    blobRetained: doc.originalRetained,
+    blobRetained: Boolean(doc.blobUrl || doc.originalRetained),
   };
 }
 
