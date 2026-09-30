@@ -12,6 +12,7 @@ export {
   parseFile,
   parseXlsx,
   parsePdf,
+  parseDocx,
   parseMatrixSpreadsheet,
 } from './parsing/index.js';
 

@@ -10,9 +10,10 @@ import {
   documentChunks,
   processingJobs,
   documentBlobs,
+  misMetrics,
 } from '@mis/db';
-import type { PipelineResult, ExtractedMetric } from '../types.js';
-import { parseFile } from '../parsing/index.js';
+import type { PipelineResult, ExtractedMetric, ParsedMatrixMetric } from '../types.js';
+import { parseFile, parseMatrixSpreadsheet } from '../parsing/index.js';
 import { extractMetrics } from '../extraction/index.js';
 import { chunkDocument } from '../chunking/index.js';
 import { embedTexts, type EmbedOptions } from '../embeddings/index.js';
@@ -139,6 +140,28 @@ export async function processDocument(
       );
     }
 
+    // Non-metric media assets (e.g. PNGs, JPEGs)
+    const isImage =
+      doc.mime?.startsWith('image/') ||
+      /\.(png|jpe?g|webp|gif)$/i.test(doc.filename);
+    if (isImage) {
+      await db
+        .update(documents)
+        .set({
+          status: 'processed',
+          processedAt: new Date(),
+          error: null,
+        })
+        .where(eq(documents.id, documentId));
+
+      return {
+        documentId,
+        status: 'processed',
+        chunksCreated: 0,
+        metricsExtracted: [],
+      };
+    }
+
     // --- STEP 1: PARSE ---
     await db
       .update(documents)
@@ -160,12 +183,120 @@ export async function processDocument(
       .where(eq(documents.id, documentId));
     await startJob('extract');
 
+    const isSpreadsheet = /\.xlsx?$/i.test(doc.filename);
+    const matrixExtractedKpis: ExtractedMetric[] = [];
+    let granularMisMetricsCount = 0;
+    let quarantinedCount = 0;
+
+    if (isSpreadsheet) {
+      const matrixResult = parseMatrixSpreadsheet(fileBytes, doc.filename);
+      granularMisMetricsCount = matrixResult.metrics.length;
+      quarantinedCount = matrixResult.quarantinedCount;
+
+      // Idempotently clean up existing mis_metrics for this document
+      await db.delete(misMetrics).where(eq(misMetrics.documentId, documentId));
+
+      // Batch insert into mis_metrics
+      const BATCH_SIZE = 200;
+      for (let i = 0; i < matrixResult.metrics.length; i += BATCH_SIZE) {
+        const batch = matrixResult.metrics.slice(i, i + BATCH_SIZE).map((m) => ({
+          documentId: doc.id,
+          companyId: doc.companyId,
+          fund: doc.fund ?? null,
+          sheetName: m.sheetName,
+          rawLabel: m.rawLabel,
+          normalizedLabel: m.normalizedLabel,
+          parentLabel: m.parentLabel ?? null,
+          standardMetricKey: m.standardMetricKey ?? null,
+          reportingPeriod: m.reportingPeriod,
+          periodDate: m.reportingPeriod ? `${m.reportingPeriod}-01` : null,
+          granularity: m.granularity ?? 'monthly',
+          value: m.value !== null ? String(m.value) : null,
+          rawValue: m.rawValue,
+          unit: m.unit,
+          currency: m.currency ?? null,
+          scale: m.scale,
+          rowIndex: m.rowIndex,
+          colIndex: m.colIndex,
+          sourceReference: m.sourceReference,
+          confidence: String(m.confidence),
+          status: m.status,
+          validationNotes: m.validationNotes ?? null,
+        }));
+        await db.insert(misMetrics).values(batch);
+      }
+
+      // Group standard KPIs by (key, period) with deterministic prioritization
+      const kpisByPeriod = new Map<string, ParsedMatrixMetric>();
+
+      const getKpiPriority = (label: string, key: string): number => {
+        const norm = label.toLowerCase();
+        if (key === 'revenue') {
+          if (norm.includes('net_revenue') || norm.includes('net revenue')) return 5;
+          if (norm.includes('revenue_from_operations') || norm.includes('revenue from operations')) return 4;
+          if (norm.includes('total_revenue') || norm.includes('total revenue')) return 3;
+          if (norm.includes('operating_revenue') || norm.includes('operating revenue')) return 2;
+          if (norm.includes('gross_revenue') || norm.includes('gross revenue')) return 1;
+          return 0;
+        }
+        if (key === 'ebitda') {
+          if (norm.includes('operating_ebitda') || norm.includes('operating ebitda')) return 2;
+          if (norm.includes('ebitda')) return 1;
+          return 0;
+        }
+        return 1;
+      };
+
+      const validKpiMetrics = matrixResult.metrics.filter(
+        (m) => m.status === 'valid' && m.value !== null && m.standardMetricKey
+      );
+
+      for (const m of validKpiMetrics) {
+        const groupKey = `${m.standardMetricKey}_${m.reportingPeriod}`;
+        const existing = kpisByPeriod.get(groupKey);
+        if (!existing) {
+          kpisByPeriod.set(groupKey, m);
+        } else {
+          const currentPrio = getKpiPriority(existing.rawLabel, existing.standardMetricKey!);
+          const newPrio = getKpiPriority(m.rawLabel, m.standardMetricKey!);
+          if (newPrio > currentPrio) {
+            kpisByPeriod.set(groupKey, m);
+          }
+        }
+      }
+
+      for (const m of kpisByPeriod.values()) {
+        matrixExtractedKpis.push({
+          metricKey: m.standardMetricKey!,
+          value: m.value!,
+          unit: m.unit,
+          reportingPeriod: m.reportingPeriod,
+          sourceReference: m.sourceReference,
+          confidence: m.confidence,
+          valueKind: 'reported',
+        });
+      }
+    }
+
     const defs = await db.select().from(metricDefinitions);
-    const extractedMetrics: ExtractedMetric[] = await extractMetrics(
+    const fallbackMetrics: ExtractedMetric[] = await extractMetrics(
       parsed,
       defs,
       doc.reportingPeriod || undefined
     );
+
+    // Merge: matrix parser standard KPIs take priority over fallback regex/LLM
+    const mergedMap = new Map<string, ExtractedMetric>();
+    for (const fm of fallbackMetrics) {
+      mergedMap.set(`${fm.metricKey}_${fm.reportingPeriod}`, fm);
+    }
+    for (const mm of matrixExtractedKpis) {
+      mergedMap.set(`${mm.metricKey}_${mm.reportingPeriod}`, mm);
+    }
+    const extractedMetrics = Array.from(mergedMap.values());
+
+    // Clean up existing metrics for this document for idempotency
+    await db.delete(metrics).where(eq(metrics.documentId, documentId));
 
     // Persist extracted metrics to database
     for (const m of extractedMetrics) {
@@ -179,7 +310,7 @@ export async function processDocument(
           unit: m.unit,
           reportingPeriod: m.reportingPeriod,
           sourceReference: m.sourceReference,
-          valueKind: m.valueKind,
+          valueKind: 'reported',
           confidence: String(m.confidence),
         })
         .onConflictDoUpdate({
@@ -193,7 +324,7 @@ export async function processDocument(
             value: String(m.value),
             unit: m.unit,
             sourceReference: m.sourceReference,
-            valueKind: m.valueKind,
+            valueKind: 'reported',
             confidence: String(m.confidence),
             updatedAt: new Date(),
           },
@@ -202,6 +333,8 @@ export async function processDocument(
 
     await completeJob({
       metricsExtractedCount: extractedMetrics.length,
+      granularMisMetricsCount,
+      quarantinedCount,
       metrics: extractedMetrics.map((m) => ({
         key: m.metricKey,
         value: m.value,
@@ -217,6 +350,7 @@ export async function processDocument(
       const periods = extractedMetrics.map((m) => m.reportingPeriod).sort();
       canonicalPeriod = periods[periods.length - 1] ?? null;
     }
+
 
     // --- STEP 3: CHUNK ---
     await startJob('chunk');

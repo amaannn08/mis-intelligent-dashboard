@@ -20,7 +20,7 @@ export interface ParsedBlock {
 
 export interface ParsedDocument {
   filename: string;
-  fileType: 'xlsx' | 'xls' | 'pdf';
+  fileType: 'xlsx' | 'xls' | 'pdf' | 'docx';
   blocks: ParsedBlock[];
   rawText: string;
   metadata?: Record<string, unknown>;
