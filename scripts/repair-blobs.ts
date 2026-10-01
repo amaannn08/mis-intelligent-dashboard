@@ -61,6 +61,9 @@ async function runRepair() {
   }
 
   const blobToken = process.env.BLOB_READ_WRITE_TOKEN || hermesEnv.MIS_BLOB_READ_WRITE_TOKEN;
+  if (blobToken) {
+    process.env.BLOB_READ_WRITE_TOKEN = blobToken;
+  }
 
   console.log('='.repeat(70));
   console.log('VERCEL BLOB STORAGE REPAIR UTILITY');
@@ -139,7 +142,7 @@ async function runRepair() {
     try {
       const blobPath = `mis-drive/${companySlug}/${doc.filename}`;
       const blobResult = await put(blobPath, fileBytes, {
-        access: 'public',
+        access: 'private',
         token: blobToken,
       });
 

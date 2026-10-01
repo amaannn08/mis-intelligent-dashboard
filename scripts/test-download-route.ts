@@ -16,10 +16,13 @@ if (fs.existsSync(hermesPath)) {
 process.env.DATABASE_URL = hermesEnv.MIS_PROD_DATABASE_URL;
 process.env.TARGET_ENV = 'prod';
 process.env.COOKIE_SECRET = hermesEnv.COOKIE_SECRET || 'dev-cookie-secret-for-testing-only-replace-in-prod-min-32-chars';
+if (hermesEnv.MIS_BLOB_READ_WRITE_TOKEN) {
+  process.env.BLOB_READ_WRITE_TOKEN = hermesEnv.MIS_BLOB_READ_WRITE_TOKEN;
+}
 
 async function testDownloadRoute() {
   console.log('='.repeat(70));
-  console.log('TESTING DOCUMENT DOWNLOAD ROUTE WITHOUT VERCEL BLOB');
+  console.log('TESTING DOCUMENT DOWNLOAD ROUTE END-TO-END (>4MB STREAMING)');
   console.log('='.repeat(70));
 
   const { signSession } = await import('../apps/web/src/lib/auth.js');

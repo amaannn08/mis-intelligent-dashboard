@@ -496,7 +496,7 @@ export async function runIngestion(options: IngestOptions) {
           if (blobToken && !blobToken.includes('placeholder')) {
             try {
               const zipBlob = await put(`mis-drive/${company.slug}/${downloaded.filename}`, downloaded.buffer, {
-                access: 'public',
+                access: 'private',
                 token: blobToken,
               });
               zipBlobUrl = zipBlob.url;
@@ -566,7 +566,7 @@ export async function runIngestion(options: IngestOptions) {
             if (blobToken && !blobToken.includes('placeholder')) {
               try {
                 const b = await put(`mis-drive/${company.slug}/${nestedName}`, nestedBytes, {
-                  access: 'public',
+                  access: 'private',
                   token: blobToken,
                 });
                 nestedBlobUrl = b.url;
@@ -643,7 +643,7 @@ export async function runIngestion(options: IngestOptions) {
         try {
           const blobPath = `mis-drive/${company.slug}/${downloaded.filename}`;
           const blobResult = await put(blobPath, downloaded.buffer, {
-            access: 'public',
+            access: 'private',
             token: blobToken,
           });
           blobUrl = blobResult.url;
