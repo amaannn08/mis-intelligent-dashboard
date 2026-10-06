@@ -45,6 +45,10 @@ export const misMetrics = pgTable(
     confidence: numeric('confidence').notNull().default('1.0'),
     status: text('status').notNull().default('valid'), // 'valid' | 'quarantined' | 'derived'
     validationNotes: text('validation_notes'), // e.g. '#REF! error quarantined'
+    blockLabel: text('block_label'), // e.g. 'Condiments'
+    blockIndex: integer('block_index'), // Sequential index of block within sheet
+    parentBlockLabel: text('parent_block_label'), // e.g. 'Blinkit'
+    kind: text('kind'), // 'currency' | 'count' | 'percent' | 'ratio'
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -62,6 +66,8 @@ export const misMetrics = pgTable(
       table.reportingPeriod
     ),
     index('mis_metrics_status_idx').on(table.status),
+    index('mis_metrics_company_block_idx').on(table.companyId, table.blockLabel),
+    index('mis_metrics_block_label_idx').on(table.blockLabel),
   ]
 );
 

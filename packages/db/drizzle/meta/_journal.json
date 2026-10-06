@@ -36,6 +36,13 @@
       "when": 1789700000000,
       "tag": "0004_add_mis_bulk_ingest_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789800000000,
+      "tag": "0005_add_mis_metrics_block_columns",
+      "breakpoints": true
     }
   ]
 }
