@@ -106,6 +106,10 @@ export interface ParsedMatrixMetric {
   confidence: number;
   status: 'valid' | 'quarantined' | 'derived';
   validationNotes?: string;
+  blockLabel?: string;
+  blockIndex?: number;
+  parentBlockLabel?: string;
+  kind?: 'count' | 'percent' | 'currency' | 'ratio';
 }
 
 export interface MatrixParseResult {

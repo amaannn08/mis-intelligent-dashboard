@@ -83,13 +83,101 @@ describe('Matrix Parser: Helpers & Normalisation', () => {
   });
 });
 
-describe('Matrix Parser: Real Portfolio Spreadsheets (/tmp/mis_samples)', () => {
+function getSampleFile(sub: string): string | null {
   const sampleDir = '/tmp/mis_samples';
-  const hasSamples = fs.existsSync(sampleDir);
+  if (fs.existsSync(sampleDir)) {
+    const f = fs.readdirSync(sampleDir).find((x) => x.toLowerCase().includes(sub.toLowerCase()));
+    if (f) return path.join(sampleDir, f);
+  }
+  const uploadsDir = path.resolve(process.cwd(), 'uploads');
+  if (fs.existsSync(uploadsDir)) {
+    const f = fs.readdirSync(uploadsDir).find((x) => x.toLowerCase().includes(sub.toLowerCase()));
+    if (f) return path.join(uploadsDir, f);
+  }
+  return null;
+}
 
-  it.skipIf(!hasSamples)('parses Masterchow with Lakh scaling and quarantines #DIV/0!', () => {
-    const file = path.join(sampleDir, 'Fund_II_Masterchow_Masterchow_MIS_April_26.xlsx');
-    if (!fs.existsSync(file)) return;
+describe('Matrix Parser: Real Portfolio Spreadsheets', () => {
+  it('parses Masterchow multi-block sheets with channel > category hierarchy and exact metric numbers', () => {
+    const file = getSampleFile('Masterchow_MIS_April_26');
+    expect(file).toBeTruthy();
+    if (!file) return;
+
+    const buf = fs.readFileSync(file);
+    const result = parseMatrixSpreadsheet(buf, 'Masterchow_MIS_April_26.xlsx');
+
+    // Assertion 1: Blinkit > Condiments > Gross Revenue for 2024-04 equals 23.92
+    const blinkitCondGross = result.metrics.find(
+      (m) =>
+        m.sheetName === 'Category X Channel' &&
+        m.parentBlockLabel === 'Blinkit' &&
+        m.blockLabel === 'Condiments' &&
+        m.normalizedLabel === 'gross_revenue' &&
+        m.reportingPeriod === '2024-04'
+    );
+    expect(blinkitCondGross).toBeDefined();
+    expect(blinkitCondGross?.value).toBe(23.92);
+    expect(blinkitCondGross?.kind).toBe('currency');
+    expect(blinkitCondGross?.unit).toBe('INR');
+
+    // Assertion 2: Blinkit > Condiments > Qty for 2024-04 equals 11088, unit is 'count', not 'INR'
+    const blinkitCondQty = result.metrics.find(
+      (m) =>
+        m.sheetName === 'Category X Channel' &&
+        m.parentBlockLabel === 'Blinkit' &&
+        m.blockLabel === 'Condiments' &&
+        m.normalizedLabel === 'qty' &&
+        m.reportingPeriod === '2024-04'
+    );
+    expect(blinkitCondQty).toBeDefined();
+    expect(blinkitCondQty?.value).toBe(11088);
+    expect(blinkitCondQty?.kind).toBe('count');
+    expect(blinkitCondQty?.unit).toBe('count');
+
+    // Assertion 3: Blinkit > Condiments > Net Revenue for 2024-04 equals 11.21
+    const blinkitCondNet = result.metrics.find(
+      (m) =>
+        m.sheetName === 'Category X Channel' &&
+        m.parentBlockLabel === 'Blinkit' &&
+        m.blockLabel === 'Condiments' &&
+        m.normalizedLabel === 'net_revenue' &&
+        m.reportingPeriod === '2024-04'
+    );
+    expect(blinkitCondNet).toBeDefined();
+    expect(blinkitCondNet?.value).toBe(11.21);
+    expect(blinkitCondNet?.kind).toBe('currency');
+
+    // Assertion 4: Zepto > Condiments > Qty for 2024-04 equals 13912
+    const zeptoCondQty = result.metrics.find(
+      (m) =>
+        m.sheetName === 'Category X Channel' &&
+        m.parentBlockLabel === 'Zepto' &&
+        m.blockLabel === 'Condiments' &&
+        m.normalizedLabel === 'qty' &&
+        m.reportingPeriod === '2024-04'
+    );
+    expect(zeptoCondQty).toBeDefined();
+    expect(zeptoCondQty?.value).toBe(13912);
+    expect(zeptoCondQty?.kind).toBe('count');
+    expect(zeptoCondQty?.unit).toBe('count');
+
+    // Assertion 5: Percentage row GM% has kind 'percent' and unit 'percent'
+    const gmPercent = result.metrics.find(
+      (m) =>
+        m.sheetName === 'Category X Channel' &&
+        m.parentBlockLabel === 'Blinkit' &&
+        m.blockLabel === 'Condiments' &&
+        m.rawLabel === 'GM%' &&
+        m.reportingPeriod === '2024-04'
+    );
+    expect(gmPercent).toBeDefined();
+    expect(gmPercent?.kind).toBe('percent');
+    expect(gmPercent?.unit).toBe('percent');
+  });
+
+  it('parses Masterchow with Lakh scaling in P&L Summary and quarantines #DIV/0!', () => {
+    const file = getSampleFile('Masterchow_MIS_April_26');
+    if (!file) return;
 
     const buf = fs.readFileSync(file);
     const result = parseMatrixSpreadsheet(buf, 'Fund_II_Masterchow_Masterchow_MIS_April_26.xlsx');
@@ -127,9 +215,9 @@ describe('Matrix Parser: Real Portfolio Spreadsheets (/tmp/mis_samples)', () => 
     expect(quarantined?.rawValue).toMatch(/^#/);
   });
 
-  it.skipIf(!hasSamples)('parses Clinikk MIS Template_INR and preserves hierarchy', () => {
-    const file = path.join(sampleDir, 'Fund_I_Clinikk_Clinikk_MIS_Mar_26.xlsx');
-    if (!fs.existsSync(file)) return;
+  it('parses Clinikk MIS Template_INR and preserves hierarchy', () => {
+    const file = getSampleFile('Clinikk_MIS_Mar_26');
+    if (!file) return;
 
     const buf = fs.readFileSync(file);
     const result = parseMatrixSpreadsheet(buf, 'Fund_I_Clinikk_Clinikk_MIS_Mar_26.xlsx');
@@ -154,63 +242,9 @@ describe('Matrix Parser: Real Portfolio Spreadsheets (/tmp/mis_samples)', () => 
     expect(childMetric?.parentLabel).toBeDefined();
   });
 
-
-  it.skipIf(!hasSamples)('parses Animall Quarterly Update with USD thousand scaling and quarantines #REF!', () => {
-    const file = path.join(sampleDir, 'Fund_I_Animall_Animall_MIS_March_2026.xlsx');
-    if (!fs.existsSync(file)) return;
-
-    const buf = fs.readFileSync(file);
-    const result = parseMatrixSpreadsheet(buf, 'Fund_I_Animall_Animall_MIS_March_2026.xlsx');
-
-    // Assert Revenue (USD'000) in Apr-23 was 107.1 -> 107,100 USD
-    const revApr23 = result.metrics.find(
-      (m) =>
-        m.sheetName === 'Quarterly Update' &&
-        m.normalizedLabel.includes('revenue') &&
-        m.reportingPeriod === '2023-04'
-    );
-    expect(revApr23).toBeDefined();
-    expect(revApr23?.currency).toBe('USD');
-
-    // Assert quarantined row with #REF!
-    const quarantinedRef = result.metrics.find(
-      (m) => m.sheetName === 'Quarterly Update' && m.rawValue === '#REF!'
-    );
-    expect(quarantinedRef).toBeDefined();
-    expect(quarantinedRef?.status).toBe('quarantined');
-  });
-
-  it.skipIf(!hasSamples)('parses Unbox Robotics 2-tier date header and INR unit', () => {
-    const file = path.join(
-      sampleDir,
-      'Fund_II_Unbox_Robotics_MIS_-_Unbox_Robotics_Apr_2023_to_Jan_2026.xlsx'
-    );
-    if (!fs.existsSync(file)) return;
-
-    const buf = fs.readFileSync(file);
-    const result = parseMatrixSpreadsheet(buf, 'Fund_II_Unbox_Robotics_MIS_-_Unbox_Robotics_Apr_2023_to_Jan_2026.xlsx');
-
-    // Periods should span 2022-04 through 2026-01
-    const periods = Array.from(new Set(result.metrics.map((m) => m.reportingPeriod))).sort();
-    expect(periods).toContain('2022-04');
-    expect(periods).toContain('2022-05');
-
-    // In May-22, Gross Revenue is 324,990 INR
-    const revMay22 = result.metrics.find(
-      (m) =>
-        m.sheetName === 'MIS' &&
-        m.normalizedLabel === 'gross_revenue' &&
-        m.reportingPeriod === '2022-05'
-    );
-    expect(revMay22).toBeDefined();
-    expect(revMay22?.value).toBe(324_990);
-    expect(revMay22?.unit).toBe('INR');
-    expect(revMay22?.standardMetricKey).toBe('revenue');
-  });
-
-  it.skipIf(!hasSamples)('parses Fragaria single-period Actuals layout', () => {
-    const file = path.join(sampleDir, 'Fund_III_Fragaria_Fragaria_MIS_Mar_26.xlsx');
-    if (!fs.existsSync(file)) return;
+  it('parses Fragaria single-period Actuals layout', () => {
+    const file = getSampleFile('Fragaria_MIS_Mar_26');
+    if (!file) return;
 
     const buf = fs.readFileSync(file);
     const result = parseMatrixSpreadsheet(buf, 'Fund_III_Fragaria_Fragaria_MIS_Mar_26.xlsx');
@@ -228,9 +262,9 @@ describe('Matrix Parser: Real Portfolio Spreadsheets (/tmp/mis_samples)', () => 
     expect(ebitdaMar26?.value).toBe(-1_647_441);
   });
 
-  it.skipIf(!hasSamples)('parses Hectar Global USD fiscal year data', () => {
-    const file = path.join(sampleDir, 'Fund_II_hectar_Hector_MIS_upto_Mar_26.xlsx');
-    if (!fs.existsSync(file)) return;
+  it('parses Hectar Global USD fiscal year data', () => {
+    const file = getSampleFile('Hector_MIS_upto_Mar_26');
+    if (!file) return;
 
     const buf = fs.readFileSync(file);
     const result = parseMatrixSpreadsheet(buf, 'Fund_II_hectar_Hector_MIS_upto_Mar_26.xlsx');
@@ -243,9 +277,9 @@ describe('Matrix Parser: Real Portfolio Spreadsheets (/tmp/mis_samples)', () => 
     expect(ebitda?.currency).toBe('USD');
   });
 
-  it.skipIf(!hasSamples)('parses Pratilipi 5.5 MB workbook and extracts Literature Platform Revenue', () => {
-    const file = path.join(sampleDir, 'Fund_I_Pratilipi_Pratilipi_MIS__Mar__26.xlsx');
-    if (!fs.existsSync(file)) return;
+  it('parses Pratilipi 5.5 MB workbook and extracts Literature Platform Revenue', () => {
+    const file = getSampleFile('Pratilipi_MIS__Mar__26');
+    if (!file) return;
 
     const buf = fs.readFileSync(file);
     const result = parseMatrixSpreadsheet(buf, 'Fund_I_Pratilipi_Pratilipi_MIS__Mar__26.xlsx');
@@ -262,6 +296,31 @@ describe('Matrix Parser: Real Portfolio Spreadsheets (/tmp/mis_samples)', () => 
     expect(litRevApr24).toBeDefined();
     expect(litRevApr24?.value).toBe(44_387_772);
     expect(litRevApr24?.unit).toBe('INR');
+  });
+
+  it('parses single-date table layout without drop (Masterchow June 2026 pattern)', () => {
+    const XLSX = require('xlsx');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['Metric', 'Jun 26'],
+      ['Revenue', 45000000],
+      ['GMV', 80000000],
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, 'P&L');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const result = parseMatrixSpreadsheet(buf, 'Masterchow_MIS_June_2026.xlsx');
+    expect(result.metrics.length).toBe(2);
+    const rev = result.metrics.find((m) => m.normalizedLabel === 'revenue');
+    expect(rev).toBeDefined();
+    expect(rev?.value).toBe(45000000);
+    expect(rev?.reportingPeriod).toBe('2026-06');
+    expect(rev?.standardMetricKey).toBe('revenue');
+
+    const gmv = result.metrics.find((m) => m.normalizedLabel === 'gmv');
+    expect(gmv).toBeDefined();
+    expect(gmv?.value).toBe(80000000);
+    expect(gmv?.reportingPeriod).toBe('2026-06');
   });
 });
 

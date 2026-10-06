@@ -14,6 +14,8 @@ export {
   normalizeLabel,
   matchStandardKpi,
   extractPeriodFromFilename,
+  isGenericTableHeader,
+  inferMetricKindAndUnit,
 } from './matrix-parser.js';
 
 /**

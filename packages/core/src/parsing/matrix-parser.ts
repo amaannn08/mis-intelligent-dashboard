@@ -258,6 +258,65 @@ export function matchStandardKpi(label: string): string | undefined {
   return undefined;
 }
 
+export function isGenericTableHeader(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  return (
+    !t ||
+    /^(?:particulars|metrics?|kpis?|description|line\s*items?|items?|accounts?|details?|summary)(?:\s+(?:in|of|\(|for)\b.*)?$/i.test(
+      t
+    )
+  );
+}
+
+export interface MetricKindAndUnit {
+  kind: 'count' | 'percent' | 'currency' | 'ratio';
+  unit: string;
+  currency?: string;
+}
+
+/**
+ * Infer unit and kind from raw metric label and active currency scale.
+ */
+export function inferMetricKindAndUnit(
+  label: string,
+  activeScale: ScaleAndCurrency
+): MetricKindAndUnit {
+  const norm = label.trim().toLowerCase();
+
+  // 1. Percentage check: suffixed %, or includes %, mix, margin %, gm %
+  if (
+    norm.includes('%') ||
+    norm.includes('margin %') ||
+    norm.includes('gm %') ||
+    norm.includes('mix') ||
+    /\b(?:percentage|ratio)\b/i.test(norm)
+  ) {
+    return { kind: 'percent', unit: 'percent' };
+  }
+
+  // 2. Count / Quantity check: Qty, Volume, Orders, Counts, Units, Headcount, etc.
+  if (
+    /^(?:qty|quantity|count|volume|units?|orders?|headcount|skus?|users?|subscribers?|customers?)\b/i.test(norm) ||
+    /\b(?:qty|quantity|units?|count|orders?|volume)\b/i.test(norm)
+  ) {
+    return { kind: 'count', unit: 'count' };
+  }
+
+  // 3. Currency / Money check (default for financial ledger lines)
+  return {
+    kind: 'currency',
+    unit: activeScale.currency,
+    currency: activeScale.currency,
+  };
+}
+
+interface SheetBlock {
+  labelCol: number;
+  blockLabel?: string;
+  blockIndex: number;
+  periods: Array<{ colIndex: number; period: string; label: string }>;
+}
+
 /**
  * Parse an Excel workbook buffer into normalized matrix metrics.
  */
@@ -307,31 +366,40 @@ export function parseMatrixSpreadsheet(
       sheetYear = y;
     }
 
-    let dateRowIndex = -1;
-    let periodColumns: Array<{ colIndex: number; period: string; label: string }> = [];
+    let activeBlocks: SheetBlock[] = [];
+    let currentParentBlockLabel: string | undefined = undefined;
+    let currentSectionLabel: string | undefined = undefined;
+    let blockIndexCounter = 0;
 
-    // Scan first 12 rows for date headers
-    for (let r = 0; r < Math.min(rows.length, 12); r++) {
+    for (let r = 0; r < rows.length; r++) {
       const row = Array.isArray(rows[r]) ? (rows[r] as unknown[]) : [];
-      const candidates: Array<{ colIndex: number; period: string; label: string }> = [];
+      const isBlank = row.every((c) => c === undefined || c === null || String(c).trim() === '');
+      if (isBlank) {
+        activeBlocks = [];
+        currentSectionLabel = undefined;
+        continue;
+      }
 
+      const col0 = String(row[0] || '').trim();
+
+      // Scan candidate periods across the row
+      const candidatePeriods: Array<{ colIndex: number; period: string; label: string }> = [];
       for (let c = 0; c < row.length; c++) {
-        const cell = row[c];
-        const period = parseReportingPeriodCell(cell, sheetYear);
+        const period = parseReportingPeriodCell(row[c], sheetYear);
         if (period) {
-          candidates.push({ colIndex: c, period, label: String(cell).trim() });
+          candidatePeriods.push({ colIndex: c, period, label: String(row[c]).trim() });
         }
       }
 
       // If candidates are derived from bare months and wrap across calendar years, adjust years backwards
-      const hasBareMonths = candidates.some((c) => /^[a-zA-Z]{3,9}$/.test(c.label));
-      if (hasBareMonths && candidates.length >= 2) {
+      const hasBareMonths = candidatePeriods.some((c) => /^[a-zA-Z]{3,9}$/.test(c.label));
+      if (hasBareMonths && candidatePeriods.length >= 2) {
         let currentY = sheetYear ?? yearFromFilename ?? 2026;
-        for (let i = candidates.length - 1; i >= 0; i--) {
-          const curr = candidates[i]!;
-          const prev = i > 0 ? candidates[i - 1] : null;
+        for (let i = candidatePeriods.length - 1; i >= 0; i--) {
+          const curr = candidatePeriods[i]!;
+          const prev = i > 0 ? candidatePeriods[i - 1] : null;
           const currMonth = parseInt(curr.period.split('-')[1]!, 10);
-          candidates[i]!.period = `${currentY}-${String(currMonth).padStart(2, '0')}`;
+          candidatePeriods[i]!.period = `${currentY}-${String(currMonth).padStart(2, '0')}`;
           if (prev) {
             const prevMonth = parseInt(prev.period.split('-')[1]!, 10);
             if (prevMonth > currMonth) {
@@ -341,162 +409,254 @@ export function parseMatrixSpreadsheet(
         }
       }
 
-      // Pattern A: 2 or more date columns
-      if (candidates.length >= 2) {
-        // Check if next row is End Date row (e.g. Unbox Robotics row 0=Start Date, row 1=End Date)
-        const nextRow = Array.isArray(rows[r + 1]) ? (rows[r + 1] as unknown[]) : [];
-        const nextCandidates: Array<{ colIndex: number; period: string; label: string }> = [];
-        for (let c = 0; c < nextRow.length; c++) {
-          const nextPeriod = parseReportingPeriodCell(nextRow[c], sheetYear);
-          if (nextPeriod) nextCandidates.push({ colIndex: c, period: nextPeriod, label: String(nextRow[c]).trim() });
-        }
-
-        if (nextCandidates.length >= 2) {
-          const rText = row.map(String).join(' ').toLowerCase();
-          if (rText.includes('start')) {
-            dateRowIndex = r + 1;
-            periodColumns = nextCandidates;
-            break;
+      // Check if this row is a 2-tier date header row where next row has end dates (e.g. Unbox Robotics)
+      if (candidatePeriods.length >= 2) {
+        const rText = row.map(String).join(' ').toLowerCase();
+        if (rText.includes('start')) {
+          const nextRow = Array.isArray(rows[r + 1]) ? (rows[r + 1] as unknown[]) : [];
+          const nextCandidates: Array<{ colIndex: number; period: string; label: string }> = [];
+          for (let c = 0; c < nextRow.length; c++) {
+            const nextPeriod = parseReportingPeriodCell(nextRow[c], sheetYear);
+            if (nextPeriod) nextCandidates.push({ colIndex: c, period: nextPeriod, label: String(nextRow[c]).trim() });
+          }
+          if (nextCandidates.length >= 2) {
+            continue; // Skip this 'start' row; next row will serve as the header
           }
         }
-
-        dateRowIndex = r;
-        periodColumns = candidates;
-        break;
       }
 
-      // Pattern B: Single date in row r (e.g. Fragaria row 0 has 'Mar-26'), followed by Actuals/Budget row
-      if (candidates.length === 1) {
-        const singleCand = candidates[0]!;
+      // Check Pattern B: Single date in row r followed by Actuals/Budget row (e.g. Fragaria)
+      if (candidatePeriods.length === 1) {
+        const singleCand = candidatePeriods[0]!;
+        let foundActuals = false;
         for (let nextR = r + 1; nextR < Math.min(rows.length, r + 4); nextR++) {
           const nextRow = Array.isArray(rows[nextR]) ? (rows[nextR] as unknown[]) : [];
           for (let c = 0; c < nextRow.length; c++) {
             const cellVal = String(nextRow[c] || '').toLowerCase().trim();
             if (cellVal === 'actuals' || cellVal === 'actual') {
-              dateRowIndex = nextR;
-              periodColumns = [{ colIndex: c, period: singleCand.period, label: 'Actuals' }];
+              activeBlocks = [
+                {
+                  labelCol: 0,
+                  blockLabel: undefined,
+                  blockIndex: blockIndexCounter++,
+                  periods: [{ colIndex: c, period: singleCand.period, label: 'Actuals' }],
+                },
+              ];
+              foundActuals = true;
+              r = nextR;
               break;
             }
           }
-          if (periodColumns.length > 0) break;
+          if (foundActuals) break;
         }
-        if (periodColumns.length > 0) break;
+        if (foundActuals) continue;
+
+        // If no actuals row, check if row r+1 has numeric data at singleCand.colIndex (e.g. Masterchow June 2026)
+        const nextRow = Array.isArray(rows[r + 1]) ? (rows[r + 1] as unknown[]) : [];
+        const nextCellVal = String(nextRow[singleCand.colIndex] || '').trim();
+        if (nextCellVal && !isNaN(Number(nextCellVal.replace(/,/g, '')))) {
+          activeBlocks = [
+            {
+              labelCol: 0,
+              blockLabel: isGenericTableHeader(col0) ? undefined : col0,
+              blockIndex: blockIndexCounter++,
+              periods: [singleCand],
+            },
+          ];
+          continue;
+        }
       }
-    }
 
-    if (periodColumns.length === 0 || dateRowIndex === -1) {
-      continue;
-    }
+      // Pattern A / Block Header Row with >= 2 dates (handles vertical and horizontal stacked blocks)
+      if (candidatePeriods.length >= 2) {
+        activeBlocks = [];
+        let cur: SheetBlock | null = null;
 
-    // Determine label column: pick column 0..(firstPeriodCol - 1) with highest text density
-    const firstPeriodCol = periodColumns[0]!.colIndex;
-    let labelCol = 0;
-    let maxTextCount = -1;
+        for (let c = 0; c < row.length; c++) {
+          const cell = row[c];
+          const period = parseReportingPeriodCell(cell, sheetYear);
+          const text = String(cell || '').trim();
 
-    for (let c = 0; c < firstPeriodCol; c++) {
-      const textCount = rows
-        .slice(dateRowIndex + 1, dateRowIndex + 25)
-        .filter((r) => Array.isArray(r) && r[c] && /[a-zA-Z]/.test(String(r[c]))).length;
-      if (textCount > maxTextCount) {
-        maxTextCount = textCount;
-        labelCol = c;
-      }
-    }
+          if (period) {
+            if (cur) {
+              cur.periods.push({ colIndex: c, period, label: text });
+            }
+          } else if (text && text.toLowerCase() !== 'grand total' && text.toLowerCase() !== 'total') {
+            if (cur && cur.periods.length >= 2) {
+              activeBlocks.push(cur);
+              cur = {
+                labelCol: c,
+                blockLabel: isGenericTableHeader(text) ? undefined : text,
+                blockIndex: blockIndexCounter++,
+                periods: [],
+              };
+            } else if (!cur) {
+              cur = {
+                labelCol: c,
+                blockLabel: isGenericTableHeader(text) ? undefined : text,
+                blockIndex: blockIndexCounter++,
+                periods: [],
+              };
+            }
+          }
+        }
+        if (cur && cur.periods.length >= 2) {
+          activeBlocks.push(cur);
+        }
 
-    let currentParentLabel: string | undefined = undefined;
+        // Fallback: If no horizontal labels found, create a single block for the whole row
+        if (activeBlocks.length === 0 && candidatePeriods.length >= 2) {
+          activeBlocks.push({
+            labelCol: 0,
+            blockLabel: isGenericTableHeader(col0) ? undefined : col0,
+            blockIndex: blockIndexCounter++,
+            periods: candidatePeriods,
+          });
+        }
 
-    // Scan data rows below header
-    for (let r = dateRowIndex + 1; r < rows.length; r++) {
-      const row = Array.isArray(rows[r]) ? (rows[r] as unknown[]) : [];
-      const rawLabel = String(row[labelCol] || '').trim();
-      if (!rawLabel) continue;
+        // Refine labelCol for each active block: pick the column before the first period column with most text rows
+        for (const blk of activeBlocks) {
+          if (blk.periods.length > 0 && blk.periods[0]!.colIndex > blk.labelCol) {
+            let bestLabelCol = blk.labelCol;
+            let maxTextCount = -1;
+            for (let c = blk.labelCol; c < blk.periods[0]!.colIndex; c++) {
+              const textCount = rows
+                .slice(r + 1, Math.min(rows.length, r + 25))
+                .filter((rowItem) => Array.isArray(rowItem) && rowItem[c] && /[a-zA-Z]/.test(String(rowItem[c]))).length;
+              if (textCount > maxTextCount) {
+                maxTextCount = textCount;
+                bestLabelCol = c;
+              }
+            }
+            blk.labelCol = bestLabelCol;
+          }
+        }
 
-      // Section header test: if row has label but all period cells are blank
-      const hasAnyData = periodColumns.some((p) => {
-        const val = row[p.colIndex];
-        return val !== undefined && val !== null && String(val).trim() !== '';
-      });
-
-      if (!hasAnyData) {
-        currentParentLabel = rawLabel;
+        currentSectionLabel = undefined;
         continue;
       }
 
-      // Row-specific scale/currency override
-      const rowScale = detectScaleAndCurrency(rawLabel);
-      const activeScale = rowScale.scaleName !== 'units' ? rowScale : sheetScale;
-      const isPercentRow =
-        rawLabel.includes('%') ||
-        rawLabel.toLowerCase().includes('mix') ||
-        rawLabel.toLowerCase().includes('margin %');
-      const standardKey = matchStandardKpi(rawLabel);
+      // Check if this is a hierarchy header row (e.g. "Blinkit", "Zepto" in Category X Channel)
+      const restHasData = row.slice(1).some((c) => c !== undefined && c !== null && String(c).trim() !== '');
+      if (col0 && !restHasData && !isGenericTableHeader(col0)) {
+        // Look ahead in next 1..3 rows to verify a block date header row follows
+        let nextHasDateHeader = false;
+        for (let nextR = r + 1; nextR < Math.min(rows.length, r + 4); nextR++) {
+          const nr = Array.isArray(rows[nextR]) ? (rows[nextR] as unknown[]) : [];
+          const cand = nr.map((c) => parseReportingPeriodCell(c, sheetYear)).filter(Boolean);
+          if (cand.length >= 2) {
+            nextHasDateHeader = true;
+            break;
+          }
+        }
 
-      for (const p of periodColumns) {
-        const cellRaw = row[p.colIndex];
-        const parsed = parseRawCellValue(cellRaw);
-
-        const colLetter = String.fromCharCode(65 + (p.colIndex % 26));
-        const srcRef = `Sheet '${sheetName}', Row ${r + 1}, Col ${colLetter} '${rawLabel}'`;
-
-        if (parsed.isError) {
-          allMetrics.push({
-            sheetName,
-            rawLabel,
-            normalizedLabel: normalizeLabel(rawLabel),
-            parentLabel: currentParentLabel,
-            standardMetricKey: standardKey,
-            reportingPeriod: p.period,
-            value: null,
-            rawValue: parsed.rawString,
-            unit: isPercentRow ? 'percent' : activeScale.currency,
-            currency: isPercentRow ? undefined : activeScale.currency,
-            scale: activeScale.scaleName,
-            rowIndex: r + 1,
-            colIndex: p.colIndex + 1,
-            sourceReference: srcRef,
-            confidence: 0.5,
-            status: 'quarantined',
-            validationNotes: `Formula error ${parsed.rawString}`,
-            granularity: p.period.includes('-03') && sheetText.toLowerCase().includes('fy') ? 'annual' : 'monthly',
-          });
+        if (nextHasDateHeader) {
+          currentParentBlockLabel = col0;
+          activeBlocks = [];
+          currentSectionLabel = undefined;
           continue;
         }
+      }
 
-        if (parsed.num === null) continue;
+      // Process metric rows for active blocks
+      if (activeBlocks.length > 0) {
+        for (const blk of activeBlocks) {
+          const rawLabel = String(row[blk.labelCol] || '').trim();
+          if (!rawLabel) continue;
 
-        let finalValue = parsed.num;
-        let finalUnit: string = activeScale.currency;
+          // Check if this row has any non-empty cell in the periods for this block
+          const hasAnyData = blk.periods.some((p) => {
+            const val = row[p.colIndex];
+            return val !== undefined && val !== null && String(val).trim() !== '';
+          });
 
-        if (parsed.isPercentage || isPercentRow) {
-          finalUnit = 'percent';
-          if (finalValue > -1 && finalValue < 1 && finalValue !== 0 && !parsed.rawString.includes('%')) {
-            finalValue = parseFloat((finalValue * 100).toFixed(4));
-          } else {
-            finalValue = parseFloat(finalValue.toFixed(4));
+          if (!hasAnyData) {
+            currentSectionLabel = rawLabel;
+            continue;
           }
-        } else if (activeScale.scaleMultiplier > 1 && Math.abs(finalValue) < 100_000) {
-          finalValue = parseFloat((finalValue * activeScale.scaleMultiplier).toFixed(2));
-        }
 
-        allMetrics.push({
-          sheetName,
-          rawLabel,
-          normalizedLabel: normalizeLabel(rawLabel),
-          parentLabel: currentParentLabel,
-          standardMetricKey: standardKey,
-          reportingPeriod: p.period,
-          value: finalValue,
-          rawValue: parsed.rawString,
-          unit: finalUnit,
-          currency: isPercentRow ? undefined : activeScale.currency,
-          scale: activeScale.scaleName,
-          rowIndex: r + 1,
-          colIndex: p.colIndex + 1,
-          sourceReference: srcRef,
-          confidence: 1.0,
-          status: 'valid',
-          granularity: p.period.includes('-03') && sheetText.toLowerCase().includes('fy') ? 'annual' : 'monthly',
-        });
+          // Row-specific scale/currency override
+          const rowScale = detectScaleAndCurrency(rawLabel);
+          const activeScale = rowScale.scaleName !== 'units' ? rowScale : sheetScale;
+          const metricKind = inferMetricKindAndUnit(rawLabel, activeScale);
+          const standardKey = matchStandardKpi(rawLabel);
+
+          for (const p of blk.periods) {
+            const cellRaw = row[p.colIndex];
+            const parsed = parseRawCellValue(cellRaw);
+
+            const colLetter = String.fromCharCode(65 + (p.colIndex % 26));
+            const srcRef = `Sheet '${sheetName}', Row ${r + 1}, Col ${colLetter} '${rawLabel}'`;
+
+            if (parsed.isError) {
+              allMetrics.push({
+                sheetName,
+                rawLabel,
+                normalizedLabel: normalizeLabel(rawLabel),
+                parentLabel: currentSectionLabel,
+                standardMetricKey: standardKey,
+                reportingPeriod: p.period,
+                value: null,
+                rawValue: parsed.rawString,
+                unit: metricKind.unit,
+                currency: metricKind.currency,
+                scale: activeScale.scaleName,
+                rowIndex: r + 1,
+                colIndex: p.colIndex + 1,
+                sourceReference: srcRef,
+                confidence: 0.5,
+                status: 'quarantined',
+                validationNotes: `Formula error ${parsed.rawString}`,
+                granularity: p.period.includes('-03') && sheetText.toLowerCase().includes('fy') ? 'annual' : 'monthly',
+                blockLabel: blk.blockLabel,
+                blockIndex: blk.blockLabel ? blk.blockIndex : undefined,
+                parentBlockLabel: currentParentBlockLabel,
+                kind: metricKind.kind,
+              });
+              continue;
+            }
+
+            if (parsed.num === null) continue;
+
+            let finalValue = parsed.num;
+
+            if (metricKind.kind === 'percent') {
+              if (finalValue > -1 && finalValue < 1 && finalValue !== 0 && !parsed.rawString.includes('%')) {
+                finalValue = parseFloat((finalValue * 100).toFixed(4));
+              } else {
+                finalValue = parseFloat(finalValue.toFixed(4));
+              }
+            } else if (metricKind.kind === 'currency') {
+              if (activeScale.scaleMultiplier > 1 && Math.abs(finalValue) < 100_000) {
+                finalValue = parseFloat((finalValue * activeScale.scaleMultiplier).toFixed(2));
+              }
+            }
+
+            allMetrics.push({
+              sheetName,
+              rawLabel,
+              normalizedLabel: normalizeLabel(rawLabel),
+              parentLabel: currentSectionLabel,
+              standardMetricKey: standardKey,
+              reportingPeriod: p.period,
+              value: finalValue,
+              rawValue: parsed.rawString,
+              unit: metricKind.unit,
+              currency: metricKind.currency,
+              scale: activeScale.scaleName,
+              rowIndex: r + 1,
+              colIndex: p.colIndex + 1,
+              sourceReference: srcRef,
+              confidence: 1.0,
+              status: 'valid',
+              granularity: p.period.includes('-03') && sheetText.toLowerCase().includes('fy') ? 'annual' : 'monthly',
+              blockLabel: blk.blockLabel,
+              blockIndex: blk.blockLabel ? blk.blockIndex : undefined,
+              parentBlockLabel: currentParentBlockLabel,
+              kind: metricKind.kind,
+            });
+          }
+        }
       }
     }
   }

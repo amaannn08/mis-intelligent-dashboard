@@ -222,6 +222,10 @@ export async function processDocument(
           confidence: String(m.confidence),
           status: m.status,
           validationNotes: m.validationNotes ?? null,
+          blockLabel: m.blockLabel ?? null,
+          blockIndex: m.blockIndex ?? null,
+          parentBlockLabel: m.parentBlockLabel ?? null,
+          kind: m.kind ?? null,
         }));
         await db.insert(misMetrics).values(batch);
       }
