@@ -156,4 +156,50 @@ describe('Chunking: Document Chunking & Source Metadata', () => {
     expect(chunks[1]!.metadata.pageNumber).toBe(2);
     expect(chunks[1]!.metadata.sheetName).toBeUndefined();
   });
+
+  it('prepends hierarchy block path to table rows and chunk content for multi-block sheets', async () => {
+    const XLSX = await import('xlsx');
+    const { parseXlsx } = await import('../packages/core/src/parsing/xlsx.js');
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['Blinkit'],
+      ['Condiments', 'Apr-24', 'May-24'],
+      ['Qty', 11088, 12600],
+      ['Net Revenue', 11.21, 14.67],
+      [],
+      ['Zepto'],
+      ['Condiments', 'Apr-24', 'May-24'],
+      ['Qty', 13912, 5272],
+      ['Net Revenue', 12.13, 1.25],
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, 'Category X Channel');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const blocks = parseXlsx(buf);
+    expect(blocks.length).toBeGreaterThan(0);
+
+    const fullText = blocks.map((b: any) => b.text).join('\n');
+    expect(fullText).toContain('Blinkit > Condiments > Net Revenue');
+    expect(fullText).toContain('Zepto > Condiments > Net Revenue');
+
+    const parsedDoc: ParsedDocument = {
+      filename: 'Masterchow_MIS_April_26.xlsx',
+      fileType: 'xlsx',
+      rawText: fullText,
+      blocks,
+    };
+
+    const chunks = chunkDocument(parsedDoc, {
+      company: 'Masterchow',
+      companyId: 'test-id',
+      documentId: 'doc-id',
+      reportingPeriod: '2026-04',
+    });
+
+    const netRevChunk = chunks.find((c) => c.content.includes('Blinkit > Condiments > Net Revenue'));
+    expect(netRevChunk).toBeDefined();
+    expect(netRevChunk?.content).toContain('11.21');
+  });
 });
+

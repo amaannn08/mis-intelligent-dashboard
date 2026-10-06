@@ -188,8 +188,9 @@ export async function processDocument(
     let granularMisMetricsCount = 0;
     let quarantinedCount = 0;
 
+    let matrixResult: ReturnType<typeof parseMatrixSpreadsheet> | undefined;
     if (isSpreadsheet) {
-      const matrixResult = parseMatrixSpreadsheet(fileBytes, doc.filename);
+      matrixResult = parseMatrixSpreadsheet(fileBytes, doc.filename);
       granularMisMetricsCount = matrixResult.metrics.length;
       quarantinedCount = matrixResult.quarantinedCount;
 
@@ -356,6 +357,45 @@ export async function processDocument(
       canonicalPeriod = periods[periods.length - 1] ?? null;
     }
 
+
+    // Synthesize structured block text chunks for multi-block spreadsheet metrics to guarantee RAG retrieval
+    if (isSpreadsheet && matrixResult && matrixResult.metrics.length > 0) {
+      const multiBlockMetrics = matrixResult.metrics.filter(
+        (m) => (m.blockLabel || m.parentBlockLabel) && m.status === 'valid' && m.value !== null
+      );
+
+      if (multiBlockMetrics.length > 0) {
+        const groups = new Map<string, typeof multiBlockMetrics>();
+        for (const m of multiBlockMetrics) {
+          const key = `${m.sheetName}:::${m.parentBlockLabel || ''}:::${m.blockLabel || ''}`;
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key)!.push(m);
+        }
+
+        for (const [key, gMetrics] of groups.entries()) {
+          const [sheetName, parentBlock, block] = key.split(':::');
+          const blockPath = [parentBlock, block].filter(Boolean).join(' > ');
+          const lines = gMetrics.map((m) => {
+            const unitScale =
+              m.kind === 'count'
+                ? 'count'
+                : m.kind === 'percent'
+                ? '%'
+                : m.scale && m.scale !== 'units'
+                ? `${m.unit} ${m.scale}`
+                : m.unit;
+            return `${company.name} | ${m.sheetName} | ${blockPath} > ${m.rawLabel} | ${m.reportingPeriod}: ${m.value} (${unitScale})`;
+          });
+
+          parsed.blocks.unshift({
+            sheet: sheetName,
+            text: `### Sheet: ${sheetName} (${blockPath})\n` + lines.join('\n'),
+            rowStart: gMetrics[0]?.rowIndex,
+            rowEnd: gMetrics[gMetrics.length - 1]?.rowIndex,
+          });
+        }
+      }
+    }
 
     // --- STEP 3: CHUNK ---
     await startJob('chunk');
