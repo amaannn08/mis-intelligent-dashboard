@@ -348,12 +348,12 @@ export async function queryMisMetrics(
     const latestVal = r.latest_value !== null ? parseFloat(r.latest_value) : undefined;
     const mult = scale === 'lakh' ? 100_000 : scale === 'crore' ? 10_000_000 : scale === 'thousand' ? 1_000 : 1;
 
-    // Detect if database values are already stored in normalized base rupees or raw sheet amounts
-    const isAlreadyNormalized = mult > 1 && Math.abs(totalVal) >= mult;
-    const normalizedCum = isAlreadyNormalized ? totalVal : totalVal * mult;
-    const normalizedLatest = latestVal !== undefined ? (isAlreadyNormalized ? latestVal : latestVal * mult) : 0;
-    const rawCum = isAlreadyNormalized ? totalVal / mult : totalVal;
-    const rawLatest = latestVal !== undefined ? (isAlreadyNormalized ? latestVal / mult : latestVal) : 0;
+    // Canonical contract: mis_metrics.value is ALREADY normalized base currency in the database.
+    // NEVER multiply value by scale in query. Derive source unscaled amount = value / multiplier.
+    const normalizedCum = totalVal;
+    const normalizedLatest = latestVal !== undefined ? latestVal : 0;
+    const rawCum = mult > 1 ? totalVal / mult : totalVal;
+    const rawLatest = latestVal !== undefined ? (mult > 1 ? latestVal / mult : latestVal) : 0;
 
     const scaleLabel = scale === 'lakh' ? 'Lakh' : scale === 'crore' ? 'Crore' : scale === 'thousand' ? 'Thousand' : 'units';
     const currencyStr = r.currency || 'INR';

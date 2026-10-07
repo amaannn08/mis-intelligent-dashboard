@@ -221,6 +221,7 @@ describe('Matrix Parser: Real Portfolio Spreadsheets', () => {
 
   it('parses Clinikk MIS Template_INR and preserves hierarchy', () => {
     const file = getSampleFile('Clinikk_MIS_Mar_26');
+    expect(file, 'Clinikk fixture must be present in uploads/ or /tmp/mis_samples').toBeTruthy();
     if (!file) return;
 
     const buf = fs.readFileSync(file);
@@ -248,6 +249,7 @@ describe('Matrix Parser: Real Portfolio Spreadsheets', () => {
 
   it('parses Fragaria single-period Actuals layout', () => {
     const file = getSampleFile('Fragaria_MIS_Mar_26');
+    expect(file, 'Fragaria fixture must be present in uploads/ or /tmp/mis_samples').toBeTruthy();
     if (!file) return;
 
     const buf = fs.readFileSync(file);
@@ -268,6 +270,7 @@ describe('Matrix Parser: Real Portfolio Spreadsheets', () => {
 
   it('parses Hectar Global USD fiscal year data', () => {
     const file = getSampleFile('Hector_MIS_upto_Mar_26');
+    expect(file, 'Hectar fixture must be present in uploads/ or /tmp/mis_samples').toBeTruthy();
     if (!file) return;
 
     const buf = fs.readFileSync(file);
@@ -283,6 +286,7 @@ describe('Matrix Parser: Real Portfolio Spreadsheets', () => {
 
   it('parses Pratilipi 5.5 MB workbook and extracts Literature Platform Revenue', () => {
     const file = getSampleFile('Pratilipi_MIS__Mar__26');
+    expect(file, 'Pratilipi fixture must be present in uploads/ or /tmp/mis_samples').toBeTruthy();
     if (!file) return;
 
     const buf = fs.readFileSync(file);
@@ -300,7 +304,7 @@ describe('Matrix Parser: Real Portfolio Spreadsheets', () => {
     expect(litRevApr24).toBeDefined();
     expect(litRevApr24?.value).toBe(44_387_772);
     expect(litRevApr24?.unit).toBe('INR');
-  });
+  }, 30000);
 
   it('parses single-date table layout without drop (Masterchow June 2026 pattern)', () => {
     const XLSX = require('xlsx');

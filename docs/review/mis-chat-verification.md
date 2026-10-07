@@ -187,11 +187,18 @@ Only Masterchow required workbook-level scale inheritance recovery (from `P&L Su
 ```bash
 npm test
 ```
-- **Tracked Files Scanned for Secrets:** 235 files, 0 leaks.
+- **Tracked Files Scanned for Secrets:** 236 files, 0 leaks.
 - **Vitest Test Files:** 16 passed (16).
 - **Total Tests:** 165 passed (165).
+- **Canonical Normalization Contract Verified:**
+  - `mis_metrics.value` is stored as normalized base currency (Masterchow `32631000`, Animall USD `176100`).
+  - Query never multiplies value by scale; derives unscaled source amounts strictly via `value / multiplier`.
+- **Real-Workbook Fixture Loading Evidence:**
+  - All real workbook fixture tests in `tests/matrix-parser.test.ts` assert presence (`expect(file).toBeTruthy()`) rather than silently returning.
+  - Verified disk fixtures loaded from `uploads/`: `Pratilipi MIS_ Mar_ 26.xlsx` (5.5 MB), `Masterchow MIS April 26.xlsx` (461 KB), `Clinikk MIS Mar 26.xlsx` (90 KB), `Fragaria MIS Mar 26.xlsx` (14 KB), `Hector MIS upto Mar 26.xlsx` (19 KB).
+  - Heavy 5.5 MB Pratilipi test assigned an explicit 30s timeout (`30000ms`), passing with full extraction of Literature Platform Revenue (44,387,772 INR in Apr-2024).
 - **Targeted Guardrail Suites:**
-  - `tests/matrix-parser.test.ts`: 12 tests passing (mixed-unit workbook preservation, global banner inheritance, count/percent non-override).
+  - `tests/matrix-parser.test.ts`: 12 tests passing (mixed-unit workbook preservation, global banner inheritance, count/percent non-override, 30s Pratilipi parsing).
   - `tests/metrics-query.test.ts`: 11 tests passing:
     1. Exact Net vs Gross Revenue Differentiation (asserts BOTH normalized base INR and source unscaled figures).
     2. Dedicated Sheet Selection & Non-Duplication (`Category` sheet, `parent_block_label IS NULL`).
@@ -204,7 +211,7 @@ npm test
 ```bash
 npm run build
 ```
-- Compiled successfully in 5.7s.
+- Compiled successfully in 3.9s.
 - 0 lint or TypeScript errors across all 20 API and UI routes.
 
 ---
