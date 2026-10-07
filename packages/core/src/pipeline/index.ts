@@ -194,42 +194,46 @@ export async function processDocument(
       granularMisMetricsCount = matrixResult.metrics.length;
       quarantinedCount = matrixResult.quarantinedCount;
 
-      // Idempotently clean up existing mis_metrics for this document
-      await db.delete(misMetrics).where(eq(misMetrics.documentId, documentId));
+      const metricsToInsert = matrixResult.metrics;
 
-      // Batch insert into mis_metrics
-      const BATCH_SIZE = 200;
-      for (let i = 0; i < matrixResult.metrics.length; i += BATCH_SIZE) {
-        const batch = matrixResult.metrics.slice(i, i + BATCH_SIZE).map((m) => ({
-          documentId: doc.id,
-          companyId: doc.companyId,
-          fund: doc.fund ?? null,
-          sheetName: m.sheetName,
-          rawLabel: m.rawLabel,
-          normalizedLabel: m.normalizedLabel,
-          parentLabel: m.parentLabel ?? null,
-          standardMetricKey: m.standardMetricKey ?? null,
-          reportingPeriod: m.reportingPeriod,
-          periodDate: m.reportingPeriod ? `${m.reportingPeriod}-01` : null,
-          granularity: m.granularity ?? 'monthly',
-          value: m.value !== null ? String(m.value) : null,
-          rawValue: m.rawValue,
-          unit: m.unit,
-          currency: m.currency ?? null,
-          scale: m.scale,
-          rowIndex: m.rowIndex,
-          colIndex: m.colIndex,
-          sourceReference: m.sourceReference,
-          confidence: String(m.confidence),
-          status: m.status,
-          validationNotes: m.validationNotes ?? null,
-          blockLabel: m.blockLabel ?? null,
-          blockIndex: m.blockIndex ?? null,
-          parentBlockLabel: m.parentBlockLabel ?? null,
-          kind: m.kind ?? null,
-        }));
-        await db.insert(misMetrics).values(batch);
-      }
+      // Idempotently and atomically replace mis_metrics for this document
+      await db.transaction(async (tx) => {
+        await tx.delete(misMetrics).where(eq(misMetrics.documentId, documentId));
+
+        // Batch insert into mis_metrics
+        const BATCH_SIZE = 300;
+        for (let i = 0; i < metricsToInsert.length; i += BATCH_SIZE) {
+          const batch = metricsToInsert.slice(i, i + BATCH_SIZE).map((m) => ({
+            documentId: doc.id,
+            companyId: doc.companyId,
+            fund: doc.fund ?? null,
+            sheetName: m.sheetName,
+            rawLabel: m.rawLabel,
+            normalizedLabel: m.normalizedLabel,
+            parentLabel: m.parentLabel ?? null,
+            standardMetricKey: m.standardMetricKey ?? null,
+            reportingPeriod: m.reportingPeriod,
+            periodDate: m.reportingPeriod ? `${m.reportingPeriod}-01` : null,
+            granularity: m.granularity ?? 'monthly',
+            value: m.value !== null ? String(m.value) : null,
+            rawValue: m.rawValue,
+            unit: m.unit,
+            currency: m.currency ?? null,
+            scale: m.scale,
+            rowIndex: m.rowIndex,
+            colIndex: m.colIndex,
+            sourceReference: m.sourceReference,
+            confidence: String(m.confidence),
+            status: m.status,
+            validationNotes: m.validationNotes ?? null,
+            blockLabel: m.blockLabel ?? null,
+            blockIndex: m.blockIndex ?? null,
+            parentBlockLabel: m.parentBlockLabel ?? null,
+            kind: m.kind ?? null,
+          }));
+          await tx.insert(misMetrics).values(batch);
+        }
+      });
 
       // Group standard KPIs by (key, period) with deterministic prioritization
       const kpisByPeriod = new Map<string, ParsedMatrixMetric>();

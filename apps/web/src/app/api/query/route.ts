@@ -284,11 +284,13 @@ export async function POST(request: NextRequest) {
 
       if (misRes.rankedCategories.length > 0) {
         let breakdownSection = `\n### Granular Category / Segment Breakdown from mis_metrics (${misRes.companyName}):\n`;
-        breakdownSection += `| Category / Segment | Channel / Parent | Metric | Total Value | Unit | Scale | Periods |\n`;
-        breakdownSection += `| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n`;
+        breakdownSection += `Source: Sheet '${misRes.authoritativeSheet || 'Category'}' in '${misRes.authoritativeDocument || ''}'. Scale: ${misRes.rankedCategories[0]?.source_scale || 'units'}.\n`;
+        breakdownSection += `| Category | Latest Month (${misRes.rankedCategories[0]?.latestPeriod}) | Cumulative (${misRes.rankedCategories[0]?.minPeriod} to ${misRes.rankedCategories[0]?.maxPeriod}) | Normalized Base INR (Cumulative) |\n`;
+        breakdownSection += `| :--- | :--- | :--- | :--- |\n`;
         for (const cat of misRes.rankedCategories) {
-          breakdownSection += `| ${cat.blockLabel} | ${cat.parentBlockLabel || 'Total'} | ${cat.metricLabel} | ${cat.totalValue} | ${cat.unit} | ${cat.scale} | ${cat.minPeriod} to ${cat.maxPeriod} |\n`;
+          breakdownSection += `| ${cat.blockLabel} | ${cat.source_value_latest_formatted} | ${cat.source_value_cumulative_formatted} | ₹${(cat.normalized_amount_cumulative_inr / 10_000_000).toFixed(2)} Cr (₹${cat.normalized_amount_cumulative_inr.toLocaleString('en-IN')}) |\n`;
         }
+        breakdownSection += `\n*NOTE: Source amounts are already formatted in ${misRes.rankedCategories[0]?.source_scale}. Do NOT multiply by scale multiplier again!*\n`;
         structuredContext = structuredContext
           ? `${structuredContext}\n\n${breakdownSection}`
           : breakdownSection;

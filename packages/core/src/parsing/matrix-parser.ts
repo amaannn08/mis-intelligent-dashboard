@@ -333,6 +333,23 @@ export function parseMatrixSpreadsheet(
   const yearMatch = filename.match(/(?:20[2-3][0-9])/);
   const yearFromFilename = yearMatch ? parseInt(yearMatch[0], 10) : undefined;
 
+  // Detect workbook-level default scale and currency banner from any sheet header (e.g. P&L Summary A1: "Particulars in INR Lac")
+  let workbookScale: ScaleAndCurrency = { scaleMultiplier: 1, scaleName: 'units', currency: 'INR' };
+  let workbookScaleExplicit = false;
+
+  for (const sn of wb.SheetNames) {
+    const s = wb.Sheets[sn];
+    if (!s || !s['!ref']) continue;
+    const sampleRows = XLSX.utils.sheet_to_json<unknown[]>(s, { header: 1, raw: false, defval: '', blankrows: false }).slice(0, 5);
+    const snText = `${sn} ${sampleRows.map((r) => (Array.isArray(r) ? r.join(' ') : '')).join(' ')}`;
+    const detected = detectScaleAndCurrency(snText);
+    if (detected.scaleName !== 'units') {
+      workbookScale = detected;
+      workbookScaleExplicit = true;
+      break;
+    }
+  }
+
   for (const sheetName of wb.SheetNames) {
     const sheet = wb.Sheets[sheetName];
     if (!sheet || !sheet['!ref']) continue;
@@ -355,7 +372,10 @@ export function parseMatrixSpreadsheet(
 
     // Detect sheet-level scale and currency context
     const sheetText = `${sheetName} ${rows.slice(0, 5).map((r) => (Array.isArray(r) ? r.join(' ') : '')).join(' ')}`;
-    const sheetScale = detectScaleAndCurrency(sheetText);
+    const detectedSheetScale = detectScaleAndCurrency(sheetText);
+    const sheetScale = detectedSheetScale.scaleName !== 'units'
+      ? detectedSheetScale
+      : (workbookScaleExplicit ? workbookScale : detectedSheetScale);
 
     // Check if sheetName has explicit year (e.g. 'till March 23' -> 2023, 'FY25' -> 2025)
     let sheetYear = yearFromFilename;
@@ -643,7 +663,7 @@ export function parseMatrixSpreadsheet(
               rawValue: parsed.rawString,
               unit: metricKind.unit,
               currency: metricKind.currency,
-              scale: activeScale.scaleName,
+              scale: metricKind.kind === 'count' || metricKind.kind === 'percent' ? 'units' : activeScale.scaleName,
               rowIndex: r + 1,
               colIndex: p.colIndex + 1,
               sourceReference: srcRef,

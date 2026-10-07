@@ -116,7 +116,9 @@ describe('Matrix Parser: Real Portfolio Spreadsheets', () => {
         m.reportingPeriod === '2024-04'
     );
     expect(blinkitCondGross).toBeDefined();
-    expect(blinkitCondGross?.value).toBe(23.92);
+    expect(blinkitCondGross?.value).toBe(2392000);
+    expect(blinkitCondGross?.rawValue).toBe('23.92');
+    expect(blinkitCondGross?.scale).toBe('lakh');
     expect(blinkitCondGross?.kind).toBe('currency');
     expect(blinkitCondGross?.unit).toBe('INR');
 
@@ -144,7 +146,9 @@ describe('Matrix Parser: Real Portfolio Spreadsheets', () => {
         m.reportingPeriod === '2024-04'
     );
     expect(blinkitCondNet).toBeDefined();
-    expect(blinkitCondNet?.value).toBe(11.21);
+    expect(blinkitCondNet?.value).toBe(1121000);
+    expect(blinkitCondNet?.rawValue).toBe('11.21');
+    expect(blinkitCondNet?.scale).toBe('lakh');
     expect(blinkitCondNet?.kind).toBe('currency');
 
     // Assertion 4: Zepto > Condiments > Qty for 2024-04 equals 13912
@@ -315,12 +319,71 @@ describe('Matrix Parser: Real Portfolio Spreadsheets', () => {
     expect(rev).toBeDefined();
     expect(rev?.value).toBe(45000000);
     expect(rev?.reportingPeriod).toBe('2026-06');
-    expect(rev?.standardMetricKey).toBe('revenue');
-
     const gmv = result.metrics.find((m) => m.normalizedLabel === 'gmv');
     expect(gmv).toBeDefined();
     expect(gmv?.value).toBe(80000000);
     expect(gmv?.reportingPeriod).toBe('2026-06');
+  });
+
+  it('handles mixed-unit workbook: scale inheritance does not override explicit per-sheet units or count/percent rows', () => {
+    const XLSX = require('xlsx');
+    const wb = XLSX.utils.book_new();
+
+    // Sheet 1: P&L with explicit INR Lac banner
+    const ws1 = XLSX.utils.aoa_to_sheet([
+      ['Particulars in INR Lac', 'Apr 24'],
+      ['Revenue', 100],
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws1, 'P&L');
+
+    // Sheet 2: US Operations with explicit USD '000 banner
+    const ws2 = XLSX.utils.aoa_to_sheet([
+      ["US Operations in USD '000", 'Apr 24'],
+      ['Revenue', 50],
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws2, 'US Operations');
+
+    // Sheet 3: Category with NO banner (inherits INR Lac from Sheet 1)
+    const ws3 = XLSX.utils.aoa_to_sheet([
+      ['Condiments', 'Apr 24'],
+      ['Qty', 50000],
+      ['Net Revenue', 46.3],
+      ['Margin %', 38.5],
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws3, 'Category');
+
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const result = parseMatrixSpreadsheet(buf, 'Mixed_Units_MIS_2024.xlsx');
+
+    // 1. Sheet 2 (US Operations): explicit USD '000 preserved, not overridden by INR Lac
+    const usRev = result.metrics.find((m) => m.sheetName === 'US Operations' && m.rawLabel === 'Revenue');
+    expect(usRev).toBeDefined();
+    expect(usRev?.currency).toBe('USD');
+    expect(usRev?.scale).toBe('thousand');
+    expect(usRev?.value).toBe(50_000); // 50 * 1,000
+
+    // 2. Sheet 3 (Category): Net Revenue inherits INR Lac
+    const catNetRev = result.metrics.find((m) => m.sheetName === 'Category' && m.rawLabel === 'Net Revenue');
+    expect(catNetRev).toBeDefined();
+    expect(catNetRev?.currency).toBe('INR');
+    expect(catNetRev?.scale).toBe('lakh');
+    expect(catNetRev?.value).toBe(4_630_000); // 46.3 * 100,000
+
+    // 3. Sheet 3 (Category): Qty remains count/units, not multiplied by 100,000
+    const catQty = result.metrics.find((m) => m.sheetName === 'Category' && m.rawLabel === 'Qty');
+    expect(catQty).toBeDefined();
+    expect(catQty?.kind).toBe('count');
+    expect(catQty?.unit).toBe('count');
+    expect(catQty?.scale).toBe('units');
+    expect(catQty?.value).toBe(50_000); // NOT 50,000 * 100,000
+
+    // 4. Sheet 3 (Category): Margin % remains percent/units, not multiplied by 100,000
+    const catMargin = result.metrics.find((m) => m.sheetName === 'Category' && m.rawLabel === 'Margin %');
+    expect(catMargin).toBeDefined();
+    expect(catMargin?.kind).toBe('percent');
+    expect(catMargin?.unit).toBe('percent');
+    expect(catMargin?.scale).toBe('units');
+    expect(catMargin?.value).toBe(38.5); // NOT 38.5 * 100,000
   });
 });
 

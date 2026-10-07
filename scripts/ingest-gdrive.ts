@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import dotenv from 'dotenv';
 import { put } from '@vercel/blob';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import type { Company } from '../packages/db/src/index.js';
 
 function maskUrl(conn: string): string {
@@ -95,6 +95,7 @@ interface DriveFile {
 
 interface IngestOptions {
   dryRun: boolean;
+  reparse?: boolean;
   target?: 'prod' | 'local';
   limit?: number;
   fund?: string;
@@ -296,6 +297,29 @@ async function downloadDriveFile(
   accessToken: string,
   file: DriveFile
 ): Promise<{ buffer: Buffer; mimeType: string; filename: string }> {
+  // Check local uploads/ disk cache to avoid redundant network roundtrips
+  const uploadsDir = path.resolve(process.cwd(), 'uploads');
+  if (fs.existsSync(uploadsDir)) {
+    const existing = fs.readdirSync(uploadsDir).find((fn) => fn.startsWith(`${file.id}_`));
+    if (existing) {
+      const diskBytes = fs.readFileSync(path.join(uploadsDir, existing));
+      if (diskBytes.length > 0) {
+        const finalName =
+          file.mimeType === 'application/vnd.google-apps.spreadsheet' && !file.name.endsWith('.xlsx')
+            ? `${file.name.replace(/\.[^/.]+$/, '')}.xlsx`
+            : file.name;
+        return {
+          buffer: diskBytes,
+          mimeType:
+            file.mimeType === 'application/vnd.google-apps.spreadsheet'
+              ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+              : file.mimeType,
+          filename: finalName,
+        };
+      }
+    }
+  }
+
   // If Google Sheet, export as xlsx
   if (file.mimeType === 'application/vnd.google-apps.spreadsheet') {
     const exportUrl = `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet&supportsAllDrives=true`;
@@ -469,7 +493,16 @@ export async function runIngestion(options: IngestOptions) {
           )
         );
 
-      if (existingDoc && existingDoc.status === 'processed') {
+      let beforeMisMetricsCount = 0;
+      if (existingDoc) {
+        const [cntRes] = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(misMetrics)
+          .where(eq(misMetrics.documentId, existingDoc.id));
+        beforeMisMetricsCount = Number(cntRes?.count ?? 0);
+      }
+
+      if (existingDoc && existingDoc.status === 'processed' && !options.reparse) {
         console.log(`${prefix} ⏭️ Already processed (checksum ${sha256.slice(0, 8)}...). Skipping.`);
         results.push({ file, status: 'skipped' });
         continue;
@@ -738,7 +771,7 @@ export async function runIngestion(options: IngestOptions) {
       const docQuarantined = docMisMetrics.filter((m) => m.status === 'quarantined').length;
 
       console.log(
-        `${prefix} ✅ Successfully processed: ${pipeRes.metricsExtracted.length} standard KPIs, ${docMisMetrics.length} granular rows (${docQuarantined} quarantined).`
+        `${prefix} ✅ Successfully processed: ${pipeRes.metricsExtracted.length} standard KPIs, ${docMisMetrics.length} granular rows (${docQuarantined} quarantined). [mis_metrics: ${beforeMisMetricsCount} -> ${docMisMetrics.length}]`
       );
 
       results.push({
@@ -833,7 +866,9 @@ if (process.argv[1]?.includes('ingest-gdrive')) {
     }
   }
 
-  runIngestion({ dryRun, target, limit, fund, company })
+  const reparse = args.includes('--reparse');
+
+  runIngestion({ dryRun, reparse, target, limit, fund, company })
     .then(() => process.exit(0))
     .catch((err) => {
       console.error('Fatal Ingestion Error:', err);
