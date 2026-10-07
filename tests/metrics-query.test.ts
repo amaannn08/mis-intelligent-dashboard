@@ -86,10 +86,24 @@ describe('queryMisMetrics: Verification & Regression Guardrails', () => {
       expect(res.authoritativeDocument).toBe('Masterchow MIS April 26.xlsx');
       expect(res.authoritativeSheet).toBe('Category');
       expect(res.rankedCategories).toHaveLength(1);
-      expect(res.rankedCategories[0].blockLabel).toBe('Condiments');
-      expect(res.rankedCategories[0].totalValue).toBe(3034.87);
-      expect(res.rankedCategories[0].latestValue).toBe(326.31);
-      expect(res.rankedCategories[0].latestPeriod).toBe('2026-04');
+      const topCat = res.rankedCategories[0];
+      expect(topCat.blockLabel).toBe('Condiments');
+      // Assert source-scale fields (exact unscaled values)
+      expect(topCat.source_value_cumulative).toBe(3034.87);
+      expect(topCat.source_value_cumulative_formatted).toBe('3034.87 Lakh');
+      expect(topCat.source_value_latest).toBe(326.31);
+      expect(topCat.source_value_latest_formatted).toBe('326.31 Lakh');
+      expect(topCat.source_scale).toBe('lakh');
+      expect(topCat.totalValue).toBe(3034.87);
+      expect(topCat.latestValue).toBe(326.31);
+      expect(topCat.latestPeriod).toBe('2026-04');
+
+      // Assert normalized base INR fields (applied multiplier, do_not_scale_again)
+      expect(topCat.normalized_amount_cumulative_inr).toBe(303487000);
+      expect(topCat.normalized_amount_latest_inr).toBe(32631000);
+      expect(topCat.scale_multiplier_applied).toBe(true);
+      expect(topCat.do_not_scale_again).toBe(true);
+      expect(topCat.value_unit).toBe('INR');
 
       // Verify exact SQL clauses passed in summary query (call #4)
       const summaryCallSql = mockQuery.mock.calls[3][0] as string;
@@ -134,7 +148,21 @@ describe('queryMisMetrics: Verification & Regression Guardrails', () => {
         metric: 'gross_revenue',
       });
 
-      expect(res.rankedCategories[0].totalValue).toBe(5930.17);
+      const topGross = res.rankedCategories[0];
+      expect(topGross.blockLabel).toBe('Condiments');
+      expect(topGross.totalValue).toBe(5930.17);
+      expect(topGross.source_value_cumulative).toBe(5930.17);
+      expect(topGross.source_value_cumulative_formatted).toBe('5930.17 Lakh');
+      expect(topGross.latestValue).toBe(607.76);
+      expect(topGross.source_value_latest).toBe(607.76);
+      expect(topGross.source_value_latest_formatted).toBe('607.76 Lakh');
+      expect(topGross.source_scale).toBe('lakh');
+      expect(topGross.normalized_amount_cumulative_inr).toBe(593017000);
+      expect(topGross.normalized_amount_latest_inr).toBe(60776000);
+      expect(topGross.scale_multiplier_applied).toBe(true);
+      expect(topGross.do_not_scale_again).toBe(true);
+      expect(topGross.value_unit).toBe('INR');
+
       const summaryCallSql = mockQuery.mock.calls[3][0] as string;
       expect(summaryCallSql).toContain("raw_label ILIKE '%Gross Revenue%'");
       expect(summaryCallSql).not.toContain("raw_label ILIKE '%Net Revenue%'");
@@ -300,6 +328,107 @@ describe('queryMisMetrics: Verification & Regression Guardrails', () => {
       expect(summaryCallSql).toContain('mm.reporting_period <= $');
       expect(mockQuery.mock.calls[3][1]).toContain('2025-04');
       expect(mockQuery.mock.calls[3][1]).toContain('2026-03');
+    });
+  });
+
+  describe('6. Generic Alternate-Company & Dynamic Scale Handling', () => {
+    it('handles alternate company Animall with USD currency and thousand scale without INR assumptions', async () => {
+      const mockQuery = vi.mocked(pool.query);
+
+      mockQuery.mockResolvedValueOnce({ rows: [{ id: 'comp-animall', name: 'Animall' }] } as any);
+      mockQuery.mockResolvedValueOnce({
+        rows: [{ id: 'doc-animall', filename: 'Animall MIS March 2026.xlsx', reporting_period: '2026-03' }],
+      } as any);
+      mockQuery.mockResolvedValueOnce({ rows: [] } as any);
+      mockQuery.mockResolvedValueOnce({
+        rows: [
+          {
+            block_label: 'Dairy Operations',
+            parent_block_label: null,
+            metric_label: 'Net Revenue',
+            unit: 'USD',
+            currency: 'USD',
+            scale: 'thousand',
+            sheet_name: 'P&L',
+            filename: 'Animall MIS March 2026.xlsx',
+            periods_count: '12',
+            min_period: '2025-04',
+            max_period: '2026-03',
+            total_value: '1500500.00',
+            avg_value: '125041.67',
+            latest_period: '2026-03',
+            latest_value: '140250.00',
+          },
+        ],
+      } as any);
+      mockQuery.mockResolvedValueOnce({ rows: [] } as any);
+
+      const res = await queryMisMetrics({
+        companyName: 'Animall',
+        metric: 'net_revenue',
+      });
+
+      expect(res.companyName).toBe('Animall');
+      expect(res.rankedCategories).toHaveLength(1);
+      const topCat = res.rankedCategories[0];
+      expect(topCat.blockLabel).toBe('Dairy Operations');
+      expect(topCat.source_value_cumulative).toBe(1500.5);
+      expect(topCat.source_value_cumulative_formatted).toBe('1500.5 Thousand');
+      expect(topCat.source_scale).toBe('thousand');
+      expect(topCat.source_currency).toBe('USD');
+      expect(topCat.value_unit).toBe('USD');
+      expect(topCat.normalized_amount_cumulative_inr).toBe(1500500);
+      expect(topCat.scale_multiplier_applied).toBe(true);
+
+      // Verify dynamic scaleProvenance and explanation without hardcoded Masterchow or Lakh
+      expect(topCat.scaleProvenance).toContain("Source scale 'thousand' (1000x multiplier, currency: USD)");
+      expect(res.explanation).not.toContain('Masterchow');
+      expect(res.explanation).not.toContain('Lakh');
+      expect(res.explanation).not.toContain('₹');
+      expect(res.explanation).toContain('USD 1,500,500');
+    });
+
+    it('handles unstated scale gracefully without inventing scale multiplier', async () => {
+      const mockQuery = vi.mocked(pool.query);
+
+      mockQuery.mockResolvedValueOnce({ rows: [{ id: 'comp-fragaria', name: 'Fragaria' }] } as any);
+      mockQuery.mockResolvedValueOnce({
+        rows: [{ id: 'doc-fragaria', filename: 'Fragaria MIS Mar 26.xlsx', reporting_period: '2026-03' }],
+      } as any);
+      mockQuery.mockResolvedValueOnce({ rows: [] } as any);
+      mockQuery.mockResolvedValueOnce({
+        rows: [
+          {
+            block_label: 'Skincare',
+            parent_block_label: null,
+            metric_label: 'Net Revenue',
+            unit: 'INR',
+            currency: 'INR',
+            scale: 'units',
+            sheet_name: 'Sales',
+            filename: 'Fragaria MIS Mar 26.xlsx',
+            periods_count: '1',
+            min_period: '2026-03',
+            max_period: '2026-03',
+            total_value: '42.00',
+            avg_value: '42.00',
+            latest_period: '2026-03',
+            latest_value: '42.00',
+          },
+        ],
+      } as any);
+      mockQuery.mockResolvedValueOnce({ rows: [] } as any);
+
+      const res = await queryMisMetrics({
+        companyName: 'Fragaria',
+        metric: 'net_revenue',
+      });
+
+      const topCat = res.rankedCategories[0];
+      expect(topCat.source_scale).toBe('units');
+      expect(topCat.source_value_cumulative).toBe(42);
+      expect(topCat.normalized_amount_cumulative_inr).toBe(42);
+      expect(topCat.scaleProvenance).toContain("Scale unstated in source sheet 'Sales'");
     });
   });
 });

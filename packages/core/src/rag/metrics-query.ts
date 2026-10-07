@@ -387,8 +387,8 @@ export async function queryMisMetrics(
       sourceDocument: r.filename,
       scaleProvenance:
         scale !== 'units'
-          ? `Inherited from workbook P&L Summary banner 'Particulars in INR Lac' (scale: ${scale}, multiplier: ${mult})`
-          : 'Scale unknown without explicit workbook banner',
+          ? `Source scale '${scale}' (${mult}x multiplier, currency: ${currencyStr}) recorded for sheet '${r.sheet_name}' in '${r.filename}'`
+          : `Scale unstated in source sheet '${r.sheet_name}' in '${r.filename}' (treated as 1:1 units, currency: ${currencyStr})`,
     };
   });
 
@@ -428,13 +428,22 @@ export async function queryMisMetrics(
 
   const top = rankedCategories[0];
   const mult = top?.source_scale === 'lakh' ? 100_000 : top?.source_scale === 'crore' ? 10_000_000 : top?.source_scale === 'thousand' ? 1_000 : 1;
+  const isINR = (top?.source_currency || '').toUpperCase() === 'INR';
+  const locale = isINR ? 'en-IN' : 'en-US';
+  const currencyPrefix = isINR ? '₹' : `${top?.source_currency || ''} `;
+  const normLatestFormatted = `${currencyPrefix}${top?.normalized_amount_latest_inr.toLocaleString(locale)}`;
+  const normCumFormatted = `${currencyPrefix}${top?.normalized_amount_cumulative_inr.toLocaleString(locale)}`;
+  const croreLatestSuffix = isINR && mult > 1 ? `, or ₹${(top?.normalized_amount_latest_inr / 10_000_000).toFixed(2)} Cr` : '';
+  const croreCumSuffix = isINR && mult > 1 ? `, or ₹${(top?.normalized_amount_cumulative_inr / 10_000_000).toFixed(2)} Cr` : '';
+  const croreInstruction = isINR && mult > 1 ? ` In Crores, these are ₹${(top?.normalized_amount_latest_inr / 10_000_000).toFixed(2)} Cr and ₹${(top?.normalized_amount_cumulative_inr / 10_000_000).toFixed(2)} Cr.` : '';
+
   const explanation =
     rankedCategories.length > 0
       ? `Authoritative source: Sheet '${top?.sheetName}' in '${top?.sourceDocument}'.
-- Latest reported period (${top?.latestPeriod}): #1 best-selling category is '${top?.blockLabel}' with ${top?.source_value_latest_formatted} (normalized: ₹${top?.normalized_amount_latest_inr.toLocaleString('en-IN')}, or ₹${(top?.normalized_amount_latest_inr / 10_000_000).toFixed(2)} Cr).
-- Cumulative across ${top?.periodsCount} months (${top?.minPeriod} to ${top?.maxPeriod}): #1 is '${top?.blockLabel}' with total ${top?.source_value_cumulative_formatted} (normalized: ₹${top?.normalized_amount_cumulative_inr.toLocaleString('en-IN')}, or ₹${(top?.normalized_amount_cumulative_inr / 10_000_000).toFixed(2)} Cr).
+- Latest reported period (${top?.latestPeriod}): #1 best-selling segment is '${top?.blockLabel}' with ${top?.source_value_latest_formatted} (normalized: ${normLatestFormatted}${croreLatestSuffix}).
+- Cumulative across ${top?.periodsCount} months (${top?.minPeriod} to ${top?.maxPeriod}): #1 is '${top?.blockLabel}' with total ${top?.source_value_cumulative_formatted} (normalized: ${normCumFormatted}${croreCumSuffix}).
 - Scale provenance: ${top?.scaleProvenance}.
-CRITICAL INSTRUCTION FOR LLM ASSISTANT: Quote the exact amounts: "${top?.source_value_latest_formatted}" (latest month ${top?.latestPeriod}) and "${top?.source_value_cumulative_formatted}" (cumulative). In Crores, these are ₹${(top?.normalized_amount_latest_inr / 10_000_000).toFixed(2)} Cr and ₹${(top?.normalized_amount_cumulative_inr / 10_000_000).toFixed(2)} Cr.${mult > 1 ? ` DO NOT multiply these numbers by ${mult} again!` : ''}`
+CRITICAL INSTRUCTION FOR LLM ASSISTANT: Quote the exact amounts: "${top?.source_value_latest_formatted}" (latest month ${top?.latestPeriod}) and "${top?.source_value_cumulative_formatted}" (cumulative).${croreInstruction}${mult > 1 ? ` DO NOT multiply these numbers by ${mult} again!` : ''}`
       : `No block-grouped records found for ${resolvedCompanyName || 'company'} with metric '${metric}'.`;
 
   return {

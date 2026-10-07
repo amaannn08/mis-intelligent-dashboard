@@ -275,22 +275,27 @@ export async function POST(request: NextRequest) {
 
   if (isBreakdownQuestion && (targetCompanyId || detectedCompanyNames.length > 0)) {
     try {
+      const targetMetric = metricKeys[0] === 'gross_revenue' ? 'gross_revenue' : 'net_revenue';
       const misRes = await queryMisMetrics({
         companyId: targetCompanyId || undefined,
         companyName: detectedCompanyNames[0],
-        metric: metricKeys[0] || 'net_revenue',
+        metric: targetMetric,
         limit: 25,
       });
 
       if (misRes.rankedCategories.length > 0) {
+        const topCat = misRes.rankedCategories[0];
         let breakdownSection = `\n### Granular Category / Segment Breakdown from mis_metrics (${misRes.companyName}):\n`;
-        breakdownSection += `Source: Sheet '${misRes.authoritativeSheet || 'Category'}' in '${misRes.authoritativeDocument || ''}'. Scale: ${misRes.rankedCategories[0]?.source_scale || 'units'}.\n`;
-        breakdownSection += `| Category | Latest Month (${misRes.rankedCategories[0]?.latestPeriod}) | Cumulative (${misRes.rankedCategories[0]?.minPeriod} to ${misRes.rankedCategories[0]?.maxPeriod}) | Normalized Base INR (Cumulative) |\n`;
+        breakdownSection += `Source: Sheet '${misRes.authoritativeSheet || 'Category'}' in '${misRes.authoritativeDocument || ''}'. Provenance: ${topCat?.scaleProvenance}.\n`;
+        breakdownSection += `| Category | Latest Month (${topCat?.latestPeriod}) | Cumulative (${topCat?.minPeriod} to ${topCat?.maxPeriod}) | Normalized Base Amount (Cumulative) |\n`;
         breakdownSection += `| :--- | :--- | :--- | :--- |\n`;
         for (const cat of misRes.rankedCategories) {
-          breakdownSection += `| ${cat.blockLabel} | ${cat.source_value_latest_formatted} | ${cat.source_value_cumulative_formatted} | ₹${(cat.normalized_amount_cumulative_inr / 10_000_000).toFixed(2)} Cr (₹${cat.normalized_amount_cumulative_inr.toLocaleString('en-IN')}) |\n`;
+          const normStr = cat.source_currency === 'INR' && cat.scale !== 'units'
+            ? `₹${(cat.normalized_amount_cumulative_inr / 10_000_000).toFixed(2)} Cr (₹${cat.normalized_amount_cumulative_inr.toLocaleString('en-IN')})`
+            : `${cat.source_currency} ${cat.normalized_amount_cumulative_inr.toLocaleString()}`;
+          breakdownSection += `| ${cat.blockLabel} | ${cat.source_value_latest_formatted} | ${cat.source_value_cumulative_formatted} | ${normStr} |\n`;
         }
-        breakdownSection += `\n*NOTE: Source amounts are already formatted in ${misRes.rankedCategories[0]?.source_scale}. Do NOT multiply by scale multiplier again!*\n`;
+        breakdownSection += `\n*NOTE ON FIGURES: For segment breakdowns, cite the source amounts in ${topCat?.source_scale} (e.g. "${topCat?.source_value_latest_formatted}" in ${topCat?.latestPeriod}, "${topCat?.source_value_cumulative_formatted}" cumulative) alongside any normalized Crore figures. DO NOT multiply by scale multiplier again!*\n`;
         structuredContext = structuredContext
           ? `${structuredContext}\n\n${breakdownSection}`
           : breakdownSection;
