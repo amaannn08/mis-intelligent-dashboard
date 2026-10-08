@@ -16,6 +16,7 @@ export * from './structured.js';
 export * from './history.js';
 export * from './prompt.js';
 export * from './charts.js';
+export * from './metrics-query.js';
 
 export interface AnswerQueryOptions {
   question: string;

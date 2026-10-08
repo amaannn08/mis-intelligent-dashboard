@@ -20,6 +20,7 @@ import {
   X,
   ArrowRight,
   MessageSquare,
+  UploadCloud,
 } from 'lucide-react';
 
 interface AppShellProps {
@@ -126,6 +127,7 @@ export function AppShell({ children, noPadding = false }: AppShellProps) {
     { href: '/', label: 'Overview', icon: LayoutDashboard },
     { href: '/companies', label: 'Companies', icon: Building2 },
     { href: '/chat', label: 'Chat', icon: MessageSquare },
+    { href: '/admin/bulk-upload', label: 'Bulk Upload', icon: UploadCloud },
   ];
 
   return (

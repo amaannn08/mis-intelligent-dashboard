@@ -18,6 +18,9 @@
     "db:seed": "npm run db:seed --workspace=@mis/db",
     "db:seed:crm": "npm run db:seed:crm --workspace=@mis/db",
     "scan:secrets": "tsx scripts/scan-secrets.ts",
+    "ingest:gdrive": "tsx scripts/ingest-gdrive.ts",
+    "blob:repair": "tsx scripts/repair-blobs.ts",
+    "test:download": "tsx --tsconfig apps/web/tsconfig.json scripts/test-download-route.ts",
     "test": "npm run scan:secrets && vitest run"
   },
   "devDependencies": {

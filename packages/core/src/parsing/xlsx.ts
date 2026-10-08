@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import type { ParsedBlock } from '../types.js';
+import { parseReportingPeriodCell, isGenericTableHeader } from './matrix-parser.js';
 
 export interface XlsxParseOptions {
   maxRowsPerBlock?: number;
@@ -85,6 +86,10 @@ export function parseXlsx(
       isHeaderCandidate: boolean;
     }
 
+    // Track hierarchy and block context across rows
+    let currentParentBlock: string | undefined = undefined;
+    let currentBlockLabel: string | undefined = undefined;
+
     const indexedRows: IndexedRow[] = [];
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i] ?? [];
@@ -97,6 +102,44 @@ export function parseXlsx(
         lastNonEmpty--;
       }
       const trimmed = row.slice(0, lastNonEmpty + 1);
+      const col0 = trimmed[0] ? trimmed[0].trim() : '';
+      const rest = trimmed.slice(1);
+
+      // Check if this row is a hierarchy header (text in col 0 only, no data in rest)
+      const restEmpty = rest.every((c) => !c || c.trim() === '');
+      if (col0 && restEmpty && !isGenericTableHeader(col0) && !/^(total|grand total)$/i.test(col0)) {
+        // Look ahead to check if followed by a date/data table
+        let followedByTable = false;
+        for (let nextR = i + 1; nextR < Math.min(rows.length, i + 5); nextR++) {
+          const nr = rows[nextR] ?? [];
+          const candDates = nr.slice(1).filter((c) => parseReportingPeriodCell(c)).length;
+          if (candDates >= 2) {
+            followedByTable = true;
+            break;
+          }
+        }
+        if (followedByTable) {
+          currentParentBlock = col0;
+          currentBlockLabel = undefined;
+        }
+      }
+
+      // Check if this row is a date/block header row (>= 2 period candidates)
+      const periodCandidates = rest.filter((c) => parseReportingPeriodCell(c)).length;
+      if (periodCandidates >= 2) {
+        if (col0 && !isGenericTableHeader(col0) && !/^(total|grand total)$/i.test(col0)) {
+          currentBlockLabel = col0;
+        }
+      } else if (col0 && (currentParentBlock || currentBlockLabel) && !col0.includes(' > ')) {
+        // Metric data row: prepend hierarchy path
+        if (!isGenericTableHeader(col0) && !/^(total|grand total)$/i.test(col0)) {
+          const pathPrefix = [currentParentBlock, currentBlockLabel].filter(Boolean).join(' > ');
+          if (pathPrefix) {
+            trimmed[0] = `${pathPrefix} > ${col0}`;
+          }
+        }
+      }
+
       const pipeString = '| ' + trimmed.join(' | ') + ' |';
 
       // Candidate header if at least 2 non-empty cells contain text/letters

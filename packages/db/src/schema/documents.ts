@@ -21,12 +21,18 @@ export const documents = pgTable(
     status: documentStatusEnum('status').notNull().default('pending'),
     error: text('error'),
     originalRetained: boolean('original_retained').default(true).notNull(),
+    fund: text('fund'), // 'Fund I' | 'Fund II' | 'Fund III'
+    driveFileId: text('drive_file_id'), // Google Drive file ID for sync
+    driveFolderPath: text('drive_folder_path'), // e.g. 'MIS FY 26/Fund I/Animall'
+    isOldMis: boolean('is_old_mis').default(false).notNull(),
     uploadedAt: timestamp('uploaded_at', { withTimezone: true }).defaultNow().notNull(),
     processedAt: timestamp('processed_at', { withTimezone: true }),
   },
   (table) => [
     uniqueIndex('documents_company_checksum_idx').on(table.companyId, table.checksum),
     index('documents_company_reporting_period_idx').on(table.companyId, table.reportingPeriod),
+    index('documents_drive_file_id_idx').on(table.driveFileId),
+    index('documents_fund_company_idx').on(table.fund, table.companyId),
   ]
 );
 

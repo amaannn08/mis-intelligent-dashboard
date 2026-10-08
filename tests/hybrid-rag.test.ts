@@ -284,4 +284,16 @@ describe('Conversation History & Prompt Source Invariants', () => {
       'Never treat previous conversation messages as an allowed source of truth for financial numbers'
     );
   });
+
+  describe('Category and Selling Query Routing', () => {
+    it('detects company and routes selling questions to metrics intent', () => {
+      const res = routeQuestion('which category is best selling for Masterchow?', {
+        knownCompanies: [{ id: 'mc-1', name: 'Masterchow', slug: 'masterchow' }],
+      });
+      expect(res.companyId).toBe('mc-1');
+      expect(res.detectedCompanyNames).toEqual(['Masterchow']);
+      expect(res.metricKeys).toContain('revenue');
+    });
+  });
 });
+

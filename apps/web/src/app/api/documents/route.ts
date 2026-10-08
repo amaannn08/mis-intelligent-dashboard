@@ -68,6 +68,9 @@ export async function POST(request: NextRequest) {
       sizeBytes?: number;
       checksum?: string;
       mime?: string;
+      fund?: string;
+      isOldMis?: boolean;
+      driveFolderPath?: string;
     };
 
     try {
@@ -141,6 +144,9 @@ export async function POST(request: NextRequest) {
         sizeBytes: Number(sizeBytes) || 0,
         checksum: checksum || `chk-${Date.now()}`,
         status: 'pending',
+        fund: body.fund ?? null,
+        isOldMis: Boolean(body.isOldMis),
+        driveFolderPath: body.driveFolderPath ?? null,
         originalRetained: true,
         uploadedAt: new Date(),
       })

@@ -20,7 +20,7 @@ export interface ParsedBlock {
 
 export interface ParsedDocument {
   filename: string;
-  fileType: 'xlsx' | 'xls' | 'pdf';
+  fileType: 'xlsx' | 'xls' | 'pdf' | 'docx';
   blocks: ParsedBlock[];
   rawText: string;
   metadata?: Record<string, unknown>;
@@ -84,4 +84,36 @@ export interface PipelineResult {
   chunksCreated: number;
   metricsExtracted: ExtractedMetric[];
   error?: string;
+}
+
+export interface ParsedMatrixMetric {
+  sheetName: string;
+  rawLabel: string;
+  normalizedLabel: string;
+  parentLabel?: string;
+  standardMetricKey?: string;
+  reportingPeriod: string;
+  periodDate?: string;
+  granularity: 'monthly' | 'quarterly' | 'annual';
+  value: number | null;
+  rawValue: string;
+  unit: string;
+  currency?: string;
+  scale: 'units' | 'lakh' | 'crore' | 'thousand' | 'million';
+  rowIndex: number;
+  colIndex: number;
+  sourceReference: string;
+  confidence: number;
+  status: 'valid' | 'quarantined' | 'derived';
+  validationNotes?: string;
+  blockLabel?: string;
+  blockIndex?: number;
+  parentBlockLabel?: string;
+  kind?: 'count' | 'percent' | 'currency' | 'ratio';
+}
+
+export interface MatrixParseResult {
+  metrics: ParsedMatrixMetric[];
+  sheetsAnalyzed: string[];
+  quarantinedCount: number;
 }

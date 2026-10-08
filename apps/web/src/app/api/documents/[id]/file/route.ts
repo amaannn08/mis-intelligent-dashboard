@@ -33,16 +33,34 @@ export async function GET(
       return apiError('NOT_FOUND', `Document with ID '${id}' not found.`, 404);
     }
 
-    if (!detail.document.originalRetained) {
-      return apiError(
-        'FILE_NOT_RETAINED',
-        'Original file was larger than 4 MB and was not retained in database storage. Parsed data and metrics are available.',
-        404
-      );
+    // 1. Direct stream from Vercel Blob if available (handles >4MB files like Pratilipi)
+    if (detail.document.blobUrl) {
+      const token = process.env.BLOB_READ_WRITE_TOKEN;
+      const blobRes = await fetch(detail.document.blobUrl, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (blobRes.ok && blobRes.body) {
+        return new NextResponse(blobRes.body as unknown as BodyInit, {
+          status: 200,
+          headers: {
+            'Content-Type': detail.document.mime || 'application/octet-stream',
+            'Content-Disposition': `attachment; filename="${encodeURIComponent(detail.document.filename)}"`,
+            'Content-Length': String(detail.document.sizeBytes),
+            'Cache-Control': 'private, max-age=3600',
+          },
+        });
+      }
     }
 
     const binaryData = await getDocumentBinary(id);
     if (!binaryData) {
+      if (!detail.document.originalRetained) {
+        return apiError(
+          'FILE_NOT_RETAINED',
+          'Original file was larger than 4 MB and was not retained in database storage. Parsed data and metrics are available.',
+          404
+        );
+      }
       return apiError(
         'NOT_FOUND',
         'Original file binary was not found in database or local storage.',
@@ -55,11 +73,12 @@ export async function GET(
       status: 200,
       headers: {
         'Content-Type': binaryData.mime || 'application/octet-stream',
-        'Content-Disposition': `inline; filename="${encodeURIComponent(binaryData.filename)}"`,
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(binaryData.filename)}"`,
         'Content-Length': String(binaryData.buffer.length),
         'Cache-Control': 'private, max-age=3600',
       },
     });
+
   } catch (err: unknown) {
     console.error(`Failed to stream document file ${id}:`, err);
     return apiError('INTERNAL_SERVER_ERROR', 'Failed to retrieve document binary.', 500);

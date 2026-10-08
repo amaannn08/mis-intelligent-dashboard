@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { streamText } from 'ai';
+import { streamText, tool, stepCountIs } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { apiError, handleZodError } from '@/lib/api-response';
 import {
@@ -12,6 +12,7 @@ import {
   getNoContextRefusal,
   retrieveRelevantChunks,
   routeQuestion,
+  queryMisMetrics,
   type MetricContextRow,
   type RetrievedChunkRow,
 } from '@mis/core';
@@ -266,8 +267,50 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  // Check if query is a granular breakdown / category / channel question
+  const isBreakdownQuestion =
+    /\b(categor|channel|product|sku|segment|breakdown|wise|selling|bestseller|best selling|top selling|popular)\b/i.test(
+      question
+    );
+
+  if (isBreakdownQuestion && (targetCompanyId || detectedCompanyNames.length > 0)) {
+    try {
+      const targetMetric = metricKeys[0] === 'gross_revenue' ? 'gross_revenue' : 'net_revenue';
+      const misRes = await queryMisMetrics({
+        companyId: targetCompanyId || undefined,
+        companyName: detectedCompanyNames[0],
+        metric: targetMetric,
+        limit: 25,
+      });
+
+      if (misRes.rankedCategories.length > 0) {
+        const topCat = misRes.rankedCategories[0];
+        let breakdownSection = `\n### Granular Category / Segment Breakdown from mis_metrics (${misRes.companyName}):\n`;
+        breakdownSection += `Source: Sheet '${misRes.authoritativeSheet || 'Category'}' in '${misRes.authoritativeDocument || ''}'. Provenance: ${topCat?.scaleProvenance}.\n`;
+        breakdownSection += `| Category | Latest Month (${topCat?.latestPeriod}) | Cumulative (${topCat?.minPeriod} to ${topCat?.maxPeriod}) | Normalized Base Amount (Cumulative) |\n`;
+        breakdownSection += `| :--- | :--- | :--- | :--- |\n`;
+        for (const cat of misRes.rankedCategories) {
+          const normStr = cat.source_currency === 'INR' && cat.scale !== 'units'
+            ? `₹${(cat.normalized_amount_cumulative_inr / 10_000_000).toFixed(2)} Cr (₹${cat.normalized_amount_cumulative_inr.toLocaleString('en-IN')})`
+            : `${cat.source_currency} ${cat.normalized_amount_cumulative_inr.toLocaleString()}`;
+          breakdownSection += `| ${cat.blockLabel} | ${cat.source_value_latest_formatted} | ${cat.source_value_cumulative_formatted} | ${normStr} |\n`;
+        }
+        breakdownSection += `\n*NOTE ON FIGURES: For segment breakdowns, cite the source amounts in ${topCat?.source_scale} (e.g. "${topCat?.source_value_latest_formatted}" in ${topCat?.latestPeriod}, "${topCat?.source_value_cumulative_formatted}" cumulative) alongside any normalized Crore figures. DO NOT multiply by scale multiplier again!*\n`;
+        structuredContext = structuredContext
+          ? `${structuredContext}\n\n${breakdownSection}`
+          : breakdownSection;
+      }
+    } catch (err) {
+      console.error('Failed to pre-query granular mis_metrics for breakdown:', err);
+    }
+  }
+
   // 7. Handle empty retrieval: honest refusal
-  if ((!vectorRows || vectorRows.length === 0) && (!structuredRows || structuredRows.length === 0)) {
+  if (
+    (!vectorRows || vectorRows.length === 0) &&
+    (!structuredRows || structuredRows.length === 0) &&
+    !structuredContext
+  ) {
     let refusalCompanyName: string | undefined;
     if (targetCompanyId) {
       const matched = knownCompanies.find((c) => c.id === targetCompanyId);
@@ -353,11 +396,46 @@ export async function POST(request: NextRequest) {
     apiKey: deepseekApiKey,
   });
 
+  const tools = {
+    query_mis_metrics: tool({
+      description:
+        'Query granular MIS metric breakdowns and rankings from the mis_metrics database table (e.g. category-level, channel-level, or product line data). Use this whenever the user asks about categories, channels, best-selling or lowest-selling segments, SKU/category revenue, volumes, or breakdowns for a company.',
+      inputSchema: z.object({
+        companyName: z.string().describe('Company name e.g. "Masterchow"'),
+        metric: z
+          .string()
+          .default('net_revenue')
+          .describe('Metric name: e.g. "net_revenue", "gross_revenue", "qty", or "revenue"'),
+        parentBlock: z
+          .string()
+          .optional()
+          .describe('Parent block filter e.g. "Blinkit", "Zepto", or channel name'),
+        block: z
+          .string()
+          .optional()
+          .describe('Block / category filter e.g. "Condiments", "Stick Noodles"'),
+        period: z.string().optional().describe('Specific period filter YYYY-MM e.g. "2024-04"'),
+      }),
+      execute: async ({ companyName, metric, parentBlock, block, period }) => {
+        return await queryMisMetrics({
+          companyName,
+          companyId: targetCompanyId || undefined,
+          metric,
+          parentBlockLabel: parentBlock,
+          blockLabel: block,
+          period,
+        });
+      },
+    }),
+  };
+
   try {
     const result = streamText({
       model: deepseek(process.env.DEEPSEEK_MODEL || 'deepseek-chat'),
       system: systemPrompt,
       prompt: question,
+      tools,
+      stopWhen: stepCountIs(3),
       temperature: 0.1,
       onFinish: async (event) => {
         if (sessionId) {
