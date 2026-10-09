@@ -69,9 +69,17 @@ export function matchMetricLabel(
 
   for (const { def, alias, cleanAlias, aliasIsPercent } of candidates) {
     // 1. Guard against percent vs currency mismatch:
-    // If definition is currency, but label contains % or margin/ratio, reject
-    if (def.unit === 'currency' && isPercentLabel && !aliasIsPercent) {
-      continue;
+    // If definition is currency, but label contains % or margin/ratio (while alias does not), reject
+    const labelHasMarginOrRatio = /\b(?:margin|ratio)\b/i.test(cleanLabel);
+    const aliasHasMarginOrRatio = /\b(?:margin|ratio)\b/i.test(cleanAlias);
+
+    if (def.unit === 'currency') {
+      if (isPercentLabel && !aliasIsPercent) {
+        continue;
+      }
+      if (labelHasMarginOrRatio && !aliasHasMarginOrRatio) {
+        continue;
+      }
     }
 
     // If definition is percent, but label does NOT contain % or margin/ratio (e.g. "Gross Profit" with no %)

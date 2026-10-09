@@ -460,9 +460,47 @@ export async function processDocument(
       .delete(documentChunks)
       .where(eq(documentChunks.documentId, documentId));
 
-    // Limit embedding to first 50 representative chunks to avoid API exhaustion on massive sheets
+    // Preserve ALL chunks in DB; compute bounded representative embeddings (max 50) with per-sheet coverage
     const MAX_EMBED_CHUNKS = 50;
-    const chunksToEmbed = chunks.slice(0, MAX_EMBED_CHUNKS);
+    const representativeChunkIndices = new Set<number>();
+
+    if (chunks.length <= MAX_EMBED_CHUNKS) {
+      chunks.forEach((c) => representativeChunkIndices.add(c.chunkIndex));
+    } else {
+      // Group chunks by sheet / section to ensure per-sheet embedding coverage
+      const chunksBySheet = new Map<string, number[]>();
+      chunks.forEach((c) => {
+        const sheet = String((c.metadata as Record<string, unknown>)?.sheetName || 'default');
+        if (!chunksBySheet.has(sheet)) chunksBySheet.set(sheet, []);
+        chunksBySheet.get(sheet)!.push(c.chunkIndex);
+      });
+
+      const sheetCount = chunksBySheet.size;
+      const basePerSheet = Math.max(1, Math.floor(MAX_EMBED_CHUNKS / sheetCount));
+
+      // 1. Pick base representative chunks from every sheet
+      for (const indices of chunksBySheet.values()) {
+        const take = Math.min(basePerSheet, indices.length);
+        for (let i = 0; i < take; i++) {
+          if (representativeChunkIndices.size < MAX_EMBED_CHUNKS) {
+            representativeChunkIndices.add(indices[i]!);
+          }
+        }
+      }
+
+      // 2. Fill remaining budget up to MAX_EMBED_CHUNKS
+      for (const indices of chunksBySheet.values()) {
+        for (const idx of indices) {
+          if (representativeChunkIndices.size >= MAX_EMBED_CHUNKS) break;
+          representativeChunkIndices.add(idx);
+        }
+        if (representativeChunkIndices.size >= MAX_EMBED_CHUNKS) break;
+      }
+    }
+
+    // Embed representative chunks
+    const chunksToEmbed = chunks.filter((c) => representativeChunkIndices.has(c.chunkIndex));
+    const embeddingMap = new Map<number, number[]>();
 
     if (chunksToEmbed.length > 0) {
       const textsToEmbed = chunksToEmbed.map((c) => c.content);
@@ -473,22 +511,31 @@ export async function processDocument(
       });
 
       for (let i = 0; i < chunksToEmbed.length; i++) {
-        const chunk = chunksToEmbed[i]!;
-        const vector = embeddings[i]!;
-
-        await db.insert(documentChunks).values({
-          documentId: doc.id,
-          companyId: doc.companyId ?? undefined,
-          chunkIndex: chunk.chunkIndex,
-          content: chunk.content,
-          tokenCount: chunk.tokenCount,
-          metadata: chunk.metadata,
-          embedding: vector,
-        });
+        embeddingMap.set(chunksToEmbed[i]!.chunkIndex, embeddings[i]!);
       }
     }
 
-    await completeJob({ embeddedChunksCount: chunksToEmbed.length });
+    // Insert ALL chunks into document_chunks in batches (preserving all text)
+    const INSERT_BATCH_SIZE = 50;
+    for (let i = 0; i < chunks.length; i += INSERT_BATCH_SIZE) {
+      const chunkBatch = chunks.slice(i, i + INSERT_BATCH_SIZE);
+      const values = chunkBatch.map((chunk) => ({
+        documentId: doc.id,
+        companyId: doc.companyId ?? undefined,
+        chunkIndex: chunk.chunkIndex,
+        content: chunk.content,
+        tokenCount: chunk.tokenCount,
+        metadata: chunk.metadata,
+        embedding: embeddingMap.get(chunk.chunkIndex) ?? null,
+      }));
+
+      await db.insert(documentChunks).values(values);
+    }
+
+    await completeJob({
+      totalChunksPreserved: chunks.length,
+      embeddedChunksCount: representativeChunkIndices.size,
+    });
 
     // --- STEP 5: PROCESSED ---
     await db

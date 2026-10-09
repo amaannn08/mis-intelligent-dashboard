@@ -101,7 +101,65 @@ export async function retrieveRelevantChunks(
     topK,
   ]);
 
-  return (queryResult as unknown as { rows: RetrievedChunkRow[] }).rows;
+  let retrievedRows = (queryResult as unknown as { rows: RetrievedChunkRow[] }).rows;
+
+  // 3. Complete Lexical Access: supplement non-embedded or low-similarity chunks via lexical matching
+  if (retrievedRows.length < topK) {
+    const remainingSlots = topK - retrievedRows.length;
+    const existingChunkIds = new Set(retrievedRows.map((r) => r.id));
+
+    // Extract substantive search keywords (len >= 4, non-stopword)
+    const keywords = question
+      .toLowerCase()
+      .replace(/[^\w\s]/g, ' ')
+      .split(/\s+/)
+      .filter(
+        (w) =>
+          w.length >= 4 &&
+          !/^(what|when|where|which|about|show|tell|have|were|with|from|this|that|your|does|their)$/.test(
+            w
+          )
+      );
+
+    if (keywords.length > 0) {
+      const keywordPattern = `%${keywords.slice(0, 3).join('%')}%`;
+      const existingIds = Array.from(existingChunkIds);
+      const lexicalSql = `
+        SELECT
+          dc.id,
+          dc.document_id,
+          dc.company_id,
+          dc.chunk_index,
+          dc.content,
+          dc.metadata,
+          c.name AS company_name,
+          d.filename,
+          d.reporting_period,
+          0.62 AS similarity
+        FROM document_chunks dc
+        JOIN companies c ON c.id = dc.company_id
+        JOIN documents d ON d.id = dc.document_id
+        WHERE ($1::uuid IS NULL OR dc.company_id = $1::uuid)
+          AND dc.content ILIKE $2
+          ${existingIds.length > 0 ? 'AND NOT (dc.id = ANY($3::uuid[]))' : ''}
+        ORDER BY d.reporting_period DESC NULLS LAST, dc.chunk_index ASC
+        LIMIT $${existingIds.length > 0 ? 4 : 3};
+      `;
+      try {
+        const queryArgs = existingIds.length > 0
+          ? [companyId || null, keywordPattern, existingIds, remainingSlots]
+          : [companyId || null, keywordPattern, remainingSlots];
+        const { rows: lexicalRows } = await pool.query(lexicalSql, queryArgs);
+        if (lexicalRows && lexicalRows.length > 0) {
+          retrievedRows = [...retrievedRows, ...lexicalRows];
+        }
+      } catch {
+        // Lexical query fallback is non-fatal
+      }
+    }
+  }
+
+  return retrievedRows;
 }
 
 /**

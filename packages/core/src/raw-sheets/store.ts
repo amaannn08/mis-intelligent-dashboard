@@ -1,13 +1,15 @@
 import { eq } from 'drizzle-orm';
-import { db as defaultDb, documents, documentSheets } from '@mis/db';
+import { db as defaultDb, documents, documentSheets, type Database } from '@mis/db';
 import type { RawWorkbookExtraction } from './types.js';
+
+type DbClient = Database | Parameters<Parameters<Database['transaction']>[0]>[0];
 
 /**
  * Idempotently and durably persists raw workbook sheets and coverage metadata.
  * Designed to execute within a pipeline transaction or standalone.
  */
 export async function saveDocumentRawSheets(
-  txOrDb: any,
+  txOrDb: DbClient | undefined,
   documentId: string,
   rawExtraction: RawWorkbookExtraction,
   semanticMetricsBySheet?: Map<string, number>,

@@ -14,6 +14,7 @@ import {
   routeQuestion,
   queryMisMetrics,
   queryRawSheetCells,
+  discoverRawSheets,
   type MetricContextRow,
   type RetrievedChunkRow,
 } from '@mis/core';
@@ -26,8 +27,24 @@ const querySchema = z.object({
   question: z.string().min(1, 'Question cannot be empty'),
   sessionId: z.string().uuid().optional(),
   companyId: z.string().uuid().nullable().optional(),
-  scope: z.string().optional(),
 });
+
+interface StructuredMetricRow {
+  company_name: string;
+  metric_key: string;
+  raw_label: string;
+  reporting_period: string;
+  period_date: Date | string | null;
+  granularity: string;
+  value: string | number | null;
+  unit: string | null;
+  currency: string | null;
+  scale: string | null;
+  kind: string | null;
+  sheet_name: string | null;
+  source_reference: string | null;
+  filename: string;
+}
 
 /**
  * Escapes non-ASCII characters to \\uXXXX so JSON can be safely transported in HTTP headers.
@@ -398,6 +415,206 @@ export async function POST(request: NextRequest) {
   });
 
   const tools = {
+    discover_raw_sheets: tool({
+      description:
+        'Discover all spreadsheet sheets, tabs, notes, and unparsed statements across documents for a company or specific document. Returns sheet names, row/col counts, detected layouts, and metric counts, even when 0 semantic metrics were extracted. Use this first when you need to know which sheets exist in a workbook or where notes/commentary/schedules are located.',
+      inputSchema: z.object({
+        companyName: z.string().optional().describe('Company name e.g. "Masterchow", "Unbox"'),
+        documentId: z.string().uuid().optional().describe('Specific document UUID'),
+        limit: z.number().int().min(1).max(200).default(50),
+        offset: z.number().int().min(0).default(0),
+      }),
+      execute: async ({ companyName, documentId, limit, offset }) => {
+        let compId = targetCompanyId || undefined;
+        if (!compId && companyName) {
+          const match = knownCompanies.find(
+            (c) => c.name.toLowerCase() === companyName.toLowerCase() || c.slug.toLowerCase() === companyName.toLowerCase()
+          );
+          if (match) compId = match.id;
+        }
+        try {
+          return await discoverRawSheets({
+            companyId: compId,
+            companyName,
+            documentId,
+            limit,
+            offset,
+          });
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          const isMissingTable = errMsg.includes('document_sheets') || errMsg.includes('relation') || errMsg.includes('does not exist');
+          return {
+            totalSheets: 0,
+            returnedCount: 0,
+            hasMore: false,
+            sheets: [],
+            warning: isMissingTable
+              ? 'Raw spreadsheet preservation schema (migration 0006) not yet applied or table empty. Please rely on structured metrics or document chunks.'
+              : `Raw sheet discovery failed: ${errMsg}`,
+          };
+        }
+      },
+    }),
+    query_raw_sheet_cells: tool({
+      description:
+        'Query verbatim raw spreadsheet cells, notes, tables, and exact coordinates (e.g. range A1:D20, or specific sheet/cell) from the durable raw sheet store. Use this to inspect notes, cap tables, unparsed statements, balance sheet schedules, cash flows, or exact formulas and raw values. Supports paging through large note texts via textOffset and textLimit.',
+      inputSchema: z.object({
+        companyName: z.string().optional().describe('Company name e.g. "Masterchow"'),
+        sheetName: z.string().optional().describe('Sheet name e.g. "P&L", "Notes", "Daily"'),
+        range: z.string().optional().describe('Cell range e.g. "A1:D20" or cell coordinate "B5"'),
+        coord: z.string().optional().describe('Exact cell coordinate e.g. "B2"'),
+        searchQuery: z.string().optional().describe('Text to search in raw cell values'),
+        limit: z.number().int().min(1).max(500).default(100).describe('Max cells to return (max 500)'),
+        offset: z.number().int().min(0).default(0).describe('Paging offset'),
+        textOffset: z.number().int().min(0).default(0).describe('Text character offset for paging large notes'),
+        textLimit: z.number().int().min(1).max(5000).default(1000).describe('Max characters per cell to return (max 5000)'),
+      }),
+      execute: async ({ companyName, sheetName, range, coord, searchQuery, limit, offset, textOffset, textLimit }) => {
+        let compId = targetCompanyId || undefined;
+        if (!compId && companyName) {
+          const match = knownCompanies.find(
+            (c) => c.name.toLowerCase() === companyName.toLowerCase() || c.slug.toLowerCase() === companyName.toLowerCase()
+          );
+          if (match) compId = match.id;
+        }
+        try {
+          return await queryRawSheetCells({
+            companyId: compId,
+            sheetName,
+            range,
+            coord,
+            searchQuery,
+            limit,
+            offset,
+            textOffset,
+            textLimit,
+          });
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          const isMissingTable = errMsg.includes('document_sheets') || errMsg.includes('relation') || errMsg.includes('does not exist');
+          return {
+            documentId: '',
+            sheetName: sheetName || '',
+            sheetIndex: 0,
+            dimensions: '',
+            totalCellsInSheet: 0,
+            isUntrustedData: true,
+            securityNotice: 'Raw spreadsheet cell query could not be completed.',
+            boundedContainerXml: `<error>${isMissingTable ? 'Raw spreadsheet preservation table (migration 0006) is not yet applied to the database.' : errMsg}</error>`,
+            coverage: { totalMatchingCells: 0, returnedCellsCount: 0, offset, limit, hasMore: false },
+            sheetMetadata: { rowCount: 0, colCount: 0, nonEmptyCells: 0, merges: [], detectedLayout: 'unknown', semanticParsed: false, semanticMetricCount: 0 },
+            cells: [],
+            warning: isMissingTable
+              ? 'Raw spreadsheet preservation schema (migration 0006) not yet applied. Please rely on structured metrics or document chunks.'
+              : `Raw cell query error: ${errMsg}`,
+          };
+        }
+      },
+    }),
+    query_structured_metrics: tool({
+      description:
+        'Query validated structured financial metrics and KPIs with parameterized filters (company, metric keys, reporting periods, granularity). Returns exact dates (daily YYYY-MM-DD or monthly YYYY-MM), units (INR, USD, count, percent), sources, and per-metric missing coverage indicators. Never arbitrary SQL.',
+      inputSchema: z.object({
+        companyName: z.string().optional().describe('Company name e.g. "SVG", "Masterchow"'),
+        metricKeys: z.array(z.string()).optional().describe('Metric keys e.g. ["revenue", "ebitda", "gross_margin", "burn", "run_rate"]'),
+        period: z.string().optional().describe('Specific period YYYY-MM e.g. "2026-03"'),
+        periodStart: z.string().optional().describe('Start period YYYY-MM'),
+        periodEnd: z.string().optional().describe('End period YYYY-MM'),
+        granularity: z.enum(['daily', 'monthly', 'quarterly', 'annual', 'snapshot']).optional(),
+        limit: z.number().int().min(1).max(200).default(50),
+      }),
+      execute: async ({ companyName, metricKeys, period, periodStart, periodEnd, granularity, limit }) => {
+        let compId = targetCompanyId || undefined;
+        let compName = companyName;
+        if (!compId && companyName) {
+          const match = knownCompanies.find(
+            (c) => c.name.toLowerCase() === companyName.toLowerCase() || c.slug.toLowerCase() === companyName.toLowerCase()
+          );
+          if (match) {
+            compId = match.id;
+            compName = match.name;
+          }
+        }
+
+        const conditions: string[] = [];
+        const params: unknown[] = [];
+
+        if (compId) {
+          params.push(compId);
+          conditions.push(`m.company_id = $${params.length}::uuid`);
+        }
+        if (metricKeys && metricKeys.length > 0) {
+          params.push(metricKeys);
+          conditions.push(`(m.standard_metric_key = ANY($${params.length}::text[]) OR m.normalized_label = ANY($${params.length}::text[]))`);
+        }
+        if (period) {
+          params.push(period);
+          conditions.push(`m.reporting_period = $${params.length}`);
+        }
+        if (periodStart) {
+          params.push(periodStart);
+          conditions.push(`m.reporting_period >= $${params.length}`);
+        }
+        if (periodEnd) {
+          params.push(periodEnd);
+          conditions.push(`m.reporting_period <= $${params.length}`);
+        }
+        if (granularity) {
+          params.push(granularity);
+          conditions.push(`m.granularity = $${params.length}`);
+        }
+
+        const whereSql = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+        // Query with current document precedence: pick latest document per company, metric, period, block
+        const sqlQuery = `
+          SELECT DISTINCT ON (m.company_id, COALESCE(m.standard_metric_key, m.normalized_label), m.reporting_period, COALESCE(m.period_date, '1970-01-01'::date), COALESCE(m.block_label, ''))
+            c.name as company_name,
+            COALESCE(m.standard_metric_key, m.normalized_label) as metric_key,
+            m.raw_label,
+            m.reporting_period,
+            m.period_date,
+            m.granularity,
+            m.value,
+            m.unit,
+            m.currency,
+            m.scale,
+            m.kind,
+            m.sheet_name,
+            m.source_reference,
+            d.filename
+          FROM mis_metrics m
+          JOIN companies c ON c.id = m.company_id
+          JOIN documents d ON d.id = m.document_id
+          ${whereSql}
+          ORDER BY m.company_id, COALESCE(m.standard_metric_key, m.normalized_label), m.reporting_period, COALESCE(m.period_date, '1970-01-01'::date), COALESCE(m.block_label, ''), d.reporting_period DESC NULLS LAST, d.uploaded_at DESC
+          LIMIT ${Math.min(limit, 200)};
+        `;
+
+        const { rows } = await pool.query<StructuredMetricRow>(sqlQuery, params);
+
+        return {
+          companyName: compName || 'Portfolio',
+          totalFound: rows.length,
+          metrics: rows.map((r: StructuredMetricRow) => ({
+            company: r.company_name,
+            metricKey: r.metric_key,
+            rawLabel: r.raw_label,
+            reportingPeriod: r.reporting_period,
+            periodDate: r.period_date ? String(r.period_date).slice(0, 10) : undefined,
+            granularity: r.granularity,
+            value: r.value !== null ? (typeof r.value === 'number' ? r.value : parseFloat(String(r.value))) : null,
+            unit: r.unit,
+            currency: r.currency,
+            scale: r.scale,
+            kind: r.kind,
+            sheetName: r.sheet_name,
+            sourceReference: r.source_reference,
+            filename: r.filename,
+          })),
+        };
+      },
+    }),
     query_mis_metrics: tool({
       description:
         'Query granular MIS metric breakdowns and rankings from the mis_metrics database table (e.g. category-level, channel-level, or product line data). Use this whenever the user asks about categories, channels, best-selling or lowest-selling segments, SKU/category revenue, volumes, or breakdowns for a company.',
@@ -425,37 +642,6 @@ export async function POST(request: NextRequest) {
           parentBlockLabel: parentBlock,
           blockLabel: block,
           period,
-        });
-      },
-    }),
-    query_raw_sheet_cells: tool({
-      description:
-        'Query verbatim raw spreadsheet cells, notes, tables, and exact coordinates (e.g. range A1:D20, or specific sheet/cell) from the durable raw sheet store. Use this to inspect notes, cap tables, unparsed statements, balance sheet schedules, cash flows, or exact formulas and raw values.',
-      inputSchema: z.object({
-        companyName: z.string().optional().describe('Company name e.g. "Masterchow"'),
-        sheetName: z.string().optional().describe('Sheet name e.g. "P&L", "Notes", "Daily"'),
-        range: z.string().optional().describe('Cell range e.g. "A1:D20" or cell coordinate "B5"'),
-        coord: z.string().optional().describe('Exact cell coordinate e.g. "B2"'),
-        searchQuery: z.string().optional().describe('Text to search in raw cell values'),
-        limit: z.number().int().min(1).max(500).default(100).describe('Max cells to return (max 500)'),
-        offset: z.number().int().min(0).default(0).describe('Paging offset'),
-      }),
-      execute: async ({ companyName, sheetName, range, coord, searchQuery, limit, offset }) => {
-        let compId = targetCompanyId || undefined;
-        if (!compId && companyName) {
-          const match = knownCompanies.find(
-            (c) => c.name.toLowerCase() === companyName.toLowerCase() || c.slug.toLowerCase() === companyName.toLowerCase()
-          );
-          if (match) compId = match.id;
-        }
-        return await queryRawSheetCells({
-          companyId: compId,
-          sheetName,
-          range,
-          coord,
-          searchQuery,
-          limit,
-          offset,
         });
       },
     }),

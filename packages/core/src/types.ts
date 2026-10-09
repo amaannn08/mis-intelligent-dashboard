@@ -110,6 +110,7 @@ export interface ParsedMatrixMetric {
   blockIndex?: number;
   parentBlockLabel?: string;
   kind?: 'count' | 'percent' | 'currency' | 'ratio';
+  periodProvenance?: 'source' | 'inferred';
 }
 
 export interface MatrixParseResult {

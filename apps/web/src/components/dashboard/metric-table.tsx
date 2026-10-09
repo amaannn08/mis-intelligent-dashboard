@@ -14,6 +14,7 @@ export interface MetricRowData {
   metricKey: string;
   label: string;
   unit: string;
+  currency?: string | null;
   value: number | string | null;
   reportingPeriod: string;
   valueKind?: 'reported' | 'calculated' | 'estimated' | string;

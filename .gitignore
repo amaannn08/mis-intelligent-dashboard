@@ -61,6 +61,10 @@ test-results/
 playwright-report/
 evidence/
 .playwright/
+docs/review/m3_*.png
+docs/review/sv_live_*.png
+docs/review/bulk_upload_flow.png
+docs/review/nav_after_settings_removed.png
 
 # ---------------------------------------------------------------------------
 # OS / editor

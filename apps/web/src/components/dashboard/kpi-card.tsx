@@ -11,6 +11,7 @@ export interface KpiCardProps {
   value: string | null | undefined;
   delta?: number | null;
   period?: string | null;
+  periodBadge?: string | null;
   kind?: 'reported' | 'calculated' | 'estimated' | null;
   status?: 'ready' | 'loading' | 'empty';
   tooltip?: string;
@@ -25,6 +26,7 @@ export const KpiCard = React.memo(function KpiCard({
   value,
   delta,
   period,
+  periodBadge,
   kind,
   status = 'ready',
   tooltip,
@@ -182,9 +184,19 @@ export const KpiCard = React.memo(function KpiCard({
 
           {/* Period */}
           {period && (
-            <span className="text-[10px] text-[#9A958E] font-mono tabular-nums">
-              {period}
-            </span>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {periodBadge && (
+                <span
+                  title={tooltip || `Metric period differs from company latest period`}
+                  className="rounded-[4px] bg-amber-500/10 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 text-[9px] font-mono font-medium tracking-tight"
+                >
+                  {periodBadge}
+                </span>
+              )}
+              <span className="text-[10px] text-[#9A958E] font-mono tabular-nums">
+                {period}
+              </span>
+            </div>
           )}
         </div>
       )}

@@ -55,6 +55,8 @@ export interface QueryRawSheetCellsParams {
   searchQuery?: string;
   limit?: number; // default 100, max 500
   offset?: number; // default 0
+  textOffset?: number; // default 0, offset for paging large text/notes
+  textLimit?: number; // default 1000, max chars per cell (max 10000)
 }
 
 export interface QueryRawSheetCellsResult {
@@ -91,5 +93,45 @@ export interface QueryRawSheetCellsResult {
     formula?: string;
     type: string;
     error?: string;
+    isTruncated?: boolean;
+    totalTextLength?: number;
+    textOffset?: number;
+    hasMoreText?: boolean;
   }>;
+}
+
+export interface DiscoverRawSheetsParams {
+  documentId?: string;
+  companyId?: string;
+  companyName?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface DiscoveredSheetInfo {
+  id: string;
+  documentId: string;
+  filename: string;
+  companyId: string | null;
+  companyName?: string | null;
+  reportingPeriod: string | null;
+  sheetIndex: number;
+  sheetName: string;
+  dimensions: string;
+  rowCount: number;
+  colCount: number;
+  nonEmptyCells: number;
+  detectedLayout: string;
+  semanticParsed: boolean;
+  semanticMetricCount: number;
+  isNotesOrUnparsed: boolean;
+}
+
+export interface DiscoverRawSheetsResult {
+  totalSheets: number;
+  returnedCount: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+  sheets: DiscoveredSheetInfo[];
 }

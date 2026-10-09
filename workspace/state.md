@@ -1,9 +1,9 @@
 # MIS Completeness & Spreadsheet Preservation: Execution State
 
-**Session Goal**: Execute Milestone 2 of the MIS Completeness & Preservation Roadmap  
-**Branch**: `feat/mis-completeness`  
-**Date**: October 9, 2026  
-**Status**: MILESTONE 2 COMPLETE — Stopped after Milestone 2 (Zero Production Writes / Deploys)
+**Session Goal**: Execute Milestone 3 of the MIS Completeness & Preservation Roadmap
+**Branch**: `feat/mis-completeness`
+**Date**: October 9, 2026
+**Status**: MILESTONE 3 COMPLETE — Stopped after Milestone 3 (Zero Production Writes / Deploys)
 
 ---
 
@@ -36,24 +36,51 @@
   - [x] Sheet semantic coverage dynamically populated with real parsed layout registry.
 - [x] **Regression Suite & Verification**:
   - [x] `tests/semantic-layouts-m2.test.ts`: 11/11 tests passing against real audited portfolio workbooks with zero silent fixture absences.
-  - [x] `npm test` (secrets scan + vitest run): 21 test files, 191 tests passing, 0 failures, 252 tracked files clean.
-  - [x] `npm run typecheck`: 0 errors across all workspaces (`web`, `@mis/core`, `@mis/db`).
+  - [x] `npm test`: 21 test files, 191 tests passing, 0 failures, 252 tracked files clean.
+  - [x] `npm run typecheck`: 0 errors.
   - [x] `nice -n15 ionice -c3 npm run build`: Next.js 15.5 production build compiled successfully.
-- [x] **Documentation & State Persistence**:
-  - [x] Updated `milestone1.md` and created `milestone2.md`.
-  - [x] Synchronized to `/home/amann/.hermes/profiles/aman/workspaces/mis-completeness/`.
+
+### Milestone 3 (Complete & Audited Locally)
+- [x] **Real Chat Model Tools in `/api/query` Route (`apps/web/src/app/api/query/route.ts`)**:
+  - [x] `discover_raw_sheets`: Paginated discovery of notes, unparsed tabs, and statements with cell counts and layout metadata.
+  - [x] `query_raw_sheet_cells`: Exact coordinate/range queries with bounded text paging (`textOffset`, `textLimit`), truncation indicators (`isTruncated`, `totalTextLength`), and `<untrusted_spreadsheet_content>` XML encapsulation mitigating prompt injection risks.
+  - [x] `query_structured_metrics`: Read-only parameterized SQL with current document precedence (`DISTINCT ON`), exact daily dates, units, and granularity. Never arbitrary model SQL.
+  - [x] `query_mis_metrics`: Granular dimensional MIS metric breakdowns.
+  - [x] **Migration 0006 Resilience**: Wrapped raw sheet tools in defensive try-catch handlers to gracefully degrade in un-migrated databases (staged for Milestone 4) and guide model to structured metrics/chunks.
+- [x] **100% Text Chunk Retention & Lexical RAG Fallback**:
+  - [x] Replaced 50-chunk deletion cap with full batch DB insertion of all text chunks in `document_chunks`.
+  - [x] Proportional per-sheet embedding budget allocation ensuring legal notes, footnotes, and statements are all embedded.
+  - [x] Lexical search fallback in `retrieveRelevantChunks` (`packages/core/src/rag/index.ts`) for non-embedded or low-similarity chunks.
+- [x] **Dashboard & Company Workspace Temporal Semantics**:
+  - [x] Decoupled company overall reporting period from metric-specific latest periods in `company-workspace.tsx`.
+  - [x] Masterchow: overall company latest `2026-06` (P&L Summary), while category/channel breakdown latest `2026-04` (Category X Channel). Rendered with explicit badges and tooltips.
+  - [x] Pratilipi: Net Revenue/EBITDA `Mar 2026`, Net Cash Burn `Mar 2025` displayed accurately.
+  - [x] `PortfolioPeriodSelector` added with explicit aggregate period switching, company coverage percentages, and currency separation (INR vs foreign currencies) without synthetic FX.
+- [x] **M2 Defect Review Fixes & Performance**:
+  - [x] `inferMetricKindAndUnit`: Monetary "Gross Margin", "Channel Margin", and "Cost Rate" strictly classified as `currency`; only `%` or explicit `GM %` / `margin %` / `mix` / `share` classified as `percent`; ratios categorized as `ratio`.
+  - [x] PO vertical time-series preserves true `monthly` granularity with `YYYY-MM-01` dates.
+  - [x] FY ranges parse to `annual` granularity ending March 31 with explicit `periodProvenance`.
+  - [x] Archive extractor symlink pre-extraction defense accelerated via native `Buffer.indexOf` SIMD search, removing redundant duplicate loops.
+- [x] **Performance & Contention Status**:
+  - [x] **Baseline Observation**: Full test suite achieved 22 files and 208 tests passing in **8.01s** under quiet system load.
+  - [x] **External Contention Blocker**: Under live concurrent Python ML workloads (>1100% CPU, 12+ GiB RAM, 5 GiB swap), test workers suffer thread starvation and large workbook parsing (Pratilipi 5.5MB) times out at 30s (taking 97s individually, suite 143s).
+  - [x] Reproducibility is blocked under external contention and is **not resolved conclusively**.
+  - [x] Global timeouts preserved at standard 30s with zero artificial timeout increases.
+- [x] **Verification, Safety & Screenshot Confidentiality**:
+  - [x] `npm run scan:secrets`: 0 secrets or credential leaks across tracked files.
+  - [x] `npm run typecheck`: 0 errors.
+  - [x] `npm run lint`: 0 errors.
+  - [x] `npm run build`: Next.js 15.5 production build successful.
+  - [x] Sensitive review screenshots containing live portfolio financials excluded via `.gitignore` (`docs/review/m3_*.png`, `docs/review/*_live*.png`) to protect public repo confidentiality.
+  - [x] Generated `workspace/milestone3.md` and updated `workspace/state.md`.
 
 ---
 
 ## Remaining Gaps & Next Milestones
 
-### Milestone 3: Dashboard & Query Temporal Precision & Chatbot Retrieval
-- Connect `queryRawSheetCells` into the streaming chat tool execution registry so the AI agent can query raw cell provenance and commentary on demand.
-- Full text chunk retention for narrative commentary, footnotes, and auditor disclaimers.
-- Dashboard temporal precision: display true latest validated reporting period rather than document upload timestamp.
-- Historical revision precedence logic.
-
 ### Milestone 4: Staged Production Re-Parse & Live Acceptance
-- Apply additive migration `0006_add_raw_sheets_preservation.sql` to live database.
-- Atomic staging/swap re-ingest of all 62 production documents and unpacked ZIP archives.
+- Staged production database migration `0006_add_raw_sheets_preservation.sql`.
+- Atomic re-parsing of all 62 production original documents and unpacked ZIP archives (including portfolio tracker).
+- Reconcile cell and metric counts against audit baseline.
 - Live acceptance testing across portfolio companies with zero production downtime.
+- Push and PR review.

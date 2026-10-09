@@ -120,7 +120,6 @@ export function CompanyWorkspace({
     return Array.from(new Set(metrics.map((m) => m.reportingPeriod))).sort();
   }, [metrics]);
   const latestPeriod = allPeriods[allPeriods.length - 1] || null;
-  const previousPeriod = allPeriods.length >= 2 ? allPeriods[allPeriods.length - 2] : null;
 
   // Filter metrics by range
   const activePeriods = React.useMemo(() => {
@@ -142,13 +141,24 @@ export function CompanyWorkspace({
   ];
 
   const kpiCardsData = standardKpiKeys.map((def) => {
-    const latestItem = metrics
-      .filter((m) => m.metricKey === def.key && m.reportingPeriod === latestPeriod)
-      .sort((a, b) => (b.id || '').localeCompare(a.id || ''))[0];
+    // 1. Resolve metric-specific valid rows across all periods
+    const metricItems = metrics.filter(
+      (m) => m.metricKey === def.key && m.value !== null && m.value !== ''
+    );
+    const metricPeriods = Array.from(new Set(metricItems.map((m) => m.reportingPeriod))).sort();
+    const metricLatestPeriod = metricPeriods[metricPeriods.length - 1] || null;
+    const metricPrevPeriod =
+      metricPeriods.length >= 2 ? metricPeriods[metricPeriods.length - 2] : null;
 
-    const prevItem = previousPeriod
-      ? metrics
-          .filter((m) => m.metricKey === def.key && m.reportingPeriod === previousPeriod)
+    const latestItem = metricLatestPeriod
+      ? metricItems
+          .filter((m) => m.reportingPeriod === metricLatestPeriod)
+          .sort((a, b) => (b.id || '').localeCompare(a.id || ''))[0]
+      : null;
+
+    const prevItem = metricPrevPeriod
+      ? metricItems
+          .filter((m) => m.reportingPeriod === metricPrevPeriod)
           .sort((a, b) => (b.id || '').localeCompare(a.id || ''))[0]
       : null;
 
@@ -165,7 +175,11 @@ export function CompanyWorkspace({
         if (def.unit === 'percent') {
           formattedValue = formatPercent(currentNum);
         } else {
-          formattedValue = formatIndianCurrency(currentNum);
+          if (latestItem.unit === 'USD' || latestItem.currency === 'USD') {
+            formattedValue = `$${currentNum.toLocaleString('en-US')}`;
+          } else {
+            formattedValue = formatIndianCurrency(currentNum);
+          }
         }
 
         if (prevItem && prevItem.value !== null && prevItem.value !== '') {
@@ -180,18 +194,29 @@ export function CompanyWorkspace({
       }
     }
 
+    const isDifferentFromCompanyLatest = Boolean(
+      metricLatestPeriod && latestPeriod && metricLatestPeriod !== latestPeriod
+    );
+
+    const periodBadge = isDifferentFromCompanyLatest
+      ? `latest ${formatPeriod(metricLatestPeriod)}`
+      : undefined;
+
     return {
       key: def.key,
       label: def.label,
       value: formattedValue,
       delta,
       showDelta: true,
-      period: latestPeriod ? formatPeriod(latestPeriod) : null,
+      period: metricLatestPeriod ? formatPeriod(metricLatestPeriod) : null,
+      periodBadge,
       kind: (latestItem?.valueKind as 'reported' | 'calculated' | 'estimated') || null,
       derivation: latestItem?.valueKind === 'calculated' ? latestItem.sourceReference : null,
       directionality: def.direction,
       tooltip: !formattedValue
         ? `No ${def.label.toLowerCase()} reported in the MIS filings for ${company.name}.`
+        : isDifferentFromCompanyLatest
+        ? `Latest reported ${def.label.toLowerCase()} is from ${formatPeriod(metricLatestPeriod)}, while company latest overall filing is ${formatPeriod(latestPeriod)}.`
         : undefined,
     };
   });

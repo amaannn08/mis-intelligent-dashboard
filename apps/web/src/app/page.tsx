@@ -10,6 +10,10 @@ import {
   PortfolioCompanyFilter,
   type CompanyFilterOption,
 } from '@/components/dashboard/portfolio-company-filter';
+import {
+  PortfolioPeriodSelector,
+  type PeriodCoverageOption,
+} from '@/components/dashboard/portfolio-period-selector';
 import { QueryPanel } from '@/components/ai/query-panel';
 import { StatusPill } from '@/components/ui/status-pill';
 import { formatBytes, formatIndianCurrency, formatPeriod } from '@/lib/formatters';
@@ -27,7 +31,23 @@ export const revalidate = 60;
 interface PageProps {
   searchParams: Promise<{
     companies?: string;
+    period?: string;
   }>;
+}
+
+interface PeriodCurrencyDbRow {
+  period: string | null;
+  unit: string | null;
+  reporting_companies: number | string | null;
+  total_revenue: number | string | null;
+}
+
+interface BurnEbitdaMetricDbRow {
+  company_id: string;
+  reporting_period: string;
+  revenue: number | string | null;
+  ebitda: number | string | null;
+  burn: number | string | null;
 }
 
 export default async function PortfolioOverviewPage({ searchParams }: PageProps) {
@@ -64,6 +84,8 @@ export default async function PortfolioOverviewPage({ searchParams }: PageProps)
   const selectedCompanyIds = selectedCompanies.map((c) => c.id);
   const isZeroSelected = selectedCompanyIds.length === 0;
 
+  const periodParam = (params.period || '').trim();
+
   // 3. Batch all dependent aggregations concurrently for selected companies
   const companyIdsList = sql.join(
     selectedCompanyIds.map((id) => sql`${id}::uuid`),
@@ -73,7 +95,7 @@ export default async function PortfolioOverviewPage({ searchParams }: PageProps)
   const [
     [docCountRow],
     [latestPeriodRow],
-    revenueTrendRes,
+    periodCurrencyRes,
     burnEbitdaMetricsRes,
     recentDocs,
   ] = isZeroSelected
@@ -110,29 +132,55 @@ export default async function PortfolioOverviewPage({ searchParams }: PageProps)
           .orderBy(desc(documents.reportingPeriod))
           .limit(1),
 
-        // Portfolio revenue trend across periods for selected companies
+        // Portfolio revenue by period & currency with CURRENT DOCUMENT PRECEDENCE (no historical duplicate sums)
         db.execute(sql`
-          SELECT reporting_period as period, SUM(value::numeric) as total_revenue
-          FROM metrics
-          WHERE metric_key = 'revenue' 
-            AND reporting_period IS NOT NULL
-            AND company_id IN (${companyIdsList})
-          GROUP BY reporting_period
-          ORDER BY reporting_period ASC
+          WITH current_metrics AS (
+            SELECT DISTINCT ON (m.company_id, m.metric_key, m.reporting_period)
+              m.company_id,
+              m.metric_key,
+              m.reporting_period,
+              m.value::numeric as value,
+              COALESCE(m.unit, 'INR') as unit
+            FROM metrics m
+            JOIN documents d ON d.id = m.document_id
+            WHERE m.metric_key = 'revenue'
+              AND m.reporting_period IS NOT NULL
+              AND m.company_id IN (${companyIdsList})
+            ORDER BY m.company_id, m.metric_key, m.reporting_period, d.reporting_period DESC NULLS LAST, d.uploaded_at DESC
+          )
+          SELECT
+            reporting_period as period,
+            unit,
+            COUNT(DISTINCT company_id)::int as reporting_companies,
+            SUM(value) as total_revenue
+          FROM current_metrics
+          GROUP BY reporting_period, unit
+          ORDER BY reporting_period ASC, unit ASC
         `),
 
-        // Company-period metric matrix (for scale-independent ratio-of-sums calculation)
+        // Company-period metric matrix with CURRENT DOCUMENT PRECEDENCE (for ratio-of-sums calculation)
         db.execute(sql`
+          WITH current_metrics AS (
+            SELECT DISTINCT ON (m.company_id, m.metric_key, m.reporting_period)
+              m.company_id,
+              m.metric_key,
+              m.reporting_period,
+              m.value::numeric as value,
+              COALESCE(m.unit, 'INR') as unit
+            FROM metrics m
+            JOIN documents d ON d.id = m.document_id
+            WHERE m.metric_key IN ('revenue', 'ebitda', 'burn')
+              AND m.reporting_period IS NOT NULL
+              AND m.company_id IN (${companyIdsList})
+            ORDER BY m.company_id, m.metric_key, m.reporting_period, d.reporting_period DESC NULLS LAST, d.uploaded_at DESC
+          )
           SELECT 
             company_id,
             reporting_period,
-            MAX(CASE WHEN metric_key = 'revenue' THEN value::numeric END) as revenue,
-            MAX(CASE WHEN metric_key = 'ebitda' THEN value::numeric END) as ebitda,
-            MAX(CASE WHEN metric_key = 'burn' THEN value::numeric END) as burn
-          FROM metrics
-          WHERE metric_key IN ('revenue', 'ebitda', 'burn')
-            AND reporting_period IS NOT NULL
-            AND company_id IN (${companyIdsList})
+            MAX(CASE WHEN metric_key = 'revenue' THEN value END) as revenue,
+            MAX(CASE WHEN metric_key = 'ebitda' THEN value END) as ebitda,
+            MAX(CASE WHEN metric_key = 'burn' THEN value END) as burn
+          FROM current_metrics
           GROUP BY company_id, reporting_period
           ORDER BY reporting_period ASC
         `),
@@ -164,37 +212,76 @@ export default async function PortfolioOverviewPage({ searchParams }: PageProps)
 
   const totalCompanies = selectedCompanies.length;
   const totalDocuments = docCountRow?.count || 0;
-  const latestPeriod = latestPeriodRow?.period || null;
 
-  const revenueTrendPoints: ChartDataPoint[] = revenueTrendRes.rows.map((row) => ({
-    period: String(row.period),
-    value: Number(row.total_revenue),
-  }));
+  // Process period options with separated currencies and company counts
+  const periodMap = new Map<string, PeriodCoverageOption>();
+  for (const row of (periodCurrencyRes.rows as unknown as PeriodCurrencyDbRow[])) {
+    const p = String(row.period);
+    if (!periodMap.has(p)) {
+      periodMap.set(p, {
+        period: p,
+        reportingCompanies: 0,
+        totalCompanies,
+        currencies: [],
+      });
+    }
+    const opt = periodMap.get(p)!;
+    opt.currencies.push({
+      currency: String(row.unit || 'INR'),
+      totalAmount: Number(row.total_revenue || 0),
+      companiesCount: Number(row.reporting_companies || 0),
+    });
+    opt.reportingCompanies = Math.max(opt.reportingCompanies, Number(row.reporting_companies || 0));
+  }
 
-  // Count companies reporting in latestPeriod with positive revenue
-  const latestReportingRows = latestPeriod
-    ? burnEbitdaMetricsRes.rows.filter(
-        (r) => r.reporting_period === latestPeriod && r.revenue !== null && Number(r.revenue) > 0
-      )
-    : [];
-  const companiesReportingLatest = latestReportingRows.length;
+  const sortedPeriods = Array.from(periodMap.keys()).sort();
+  const latestPeriod = sortedPeriods[sortedPeriods.length - 1] || latestPeriodRow?.period || null;
+  const activePeriod =
+    periodParam && sortedPeriods.includes(periodParam) ? periodParam : latestPeriod;
+  const activeOption = activePeriod ? periodMap.get(activePeriod) : undefined;
+  const companiesReportingActive = activeOption?.reportingCompanies || 0;
 
-  // Calculate latest portfolio revenue & MoM delta
-  let totalLatestRevenue: number | null = null;
-  let revenueDelta: number | null = null;
-  if (revenueTrendPoints.length > 0) {
-    totalLatestRevenue = revenueTrendPoints[revenueTrendPoints.length - 1].value;
-    if (revenueTrendPoints.length >= 2) {
-      const prevRevenue = revenueTrendPoints[revenueTrendPoints.length - 2].value;
-      if (prevRevenue > 0) {
-        revenueDelta = ((totalLatestRevenue - prevRevenue) / prevRevenue) * 100;
+  // Build primary currency (INR) revenue trend points without synthetic FX
+  const revenueTrendPoints: ChartDataPoint[] = [];
+  for (const p of sortedPeriods) {
+    const opt = periodMap.get(p);
+    const inrRev = opt?.currencies.find((c) => c.currency === 'INR')?.totalAmount;
+    if (inrRev !== undefined) {
+      revenueTrendPoints.push({ period: p, value: inrRev });
+    } else if (opt && opt.currencies.length > 0) {
+      revenueTrendPoints.push({ period: p, value: opt.currencies[0]!.totalAmount });
+    }
+  }
+
+  // Active period revenue figures (currency-separated)
+  const inrActiveRev = activeOption?.currencies.find((c) => c.currency === 'INR')?.totalAmount;
+  const foreignActiveRev = activeOption?.currencies.find((c) => c.currency !== 'INR');
+  const primaryRevenue =
+    inrActiveRev !== undefined
+      ? inrActiveRev
+      : foreignActiveRev
+      ? foreignActiveRev.totalAmount
+      : null;
+  const primaryCurrency =
+    inrActiveRev !== undefined ? 'INR' : foreignActiveRev ? foreignActiveRev.currency : 'INR';
+
+  // Compute MoM delta for active period in primary currency
+  let activeRevenueDelta: number | null = null;
+  if (activePeriod && primaryRevenue !== null) {
+    const activeIdx = sortedPeriods.indexOf(activePeriod);
+    if (activeIdx > 0) {
+      const prevPeriod = sortedPeriods[activeIdx - 1];
+      const prevOpt = periodMap.get(prevPeriod!);
+      const prevRev = prevOpt?.currencies.find((c) => c.currency === primaryCurrency)?.totalAmount;
+      if (prevRev !== undefined && prevRev > 0) {
+        activeRevenueDelta = ((primaryRevenue - prevRev) / prevRev) * 100;
       }
     }
   }
 
   // Compute Burn & EBITDA % series using ratio of sums with zero-revenue company exclusion
   const burnEbitdaPoints = computeBurnEbitdaSeries(
-    burnEbitdaMetricsRes.rows.map((r) => ({
+    (burnEbitdaMetricsRes.rows as unknown as BurnEbitdaMetricDbRow[]).map((r) => ({
       companyId: String(r.company_id),
       reportingPeriod: String(r.reporting_period),
       revenue: r.revenue !== null ? Number(r.revenue) : null,
@@ -203,7 +290,7 @@ export default async function PortfolioOverviewPage({ searchParams }: PageProps)
     }))
   );
 
-  const reportingPeriodStr = latestPeriod ? formatPeriod(latestPeriod) : 'latest';
+  const reportingPeriodStr = activePeriod ? formatPeriod(activePeriod) : 'latest';
   const statChips = [
     {
       label: 'Selected companies',
@@ -215,11 +302,16 @@ export default async function PortfolioOverviewPage({ searchParams }: PageProps)
     },
     {
       label: `selected have a ${reportingPeriodStr} MIS`,
-      value: `Reporting: ${companiesReportingLatest} of ${totalCompanies}`,
+      value: `Reporting: ${companiesReportingActive} of ${totalCompanies}`,
     },
     {
-      label: `Revenue (${companiesReportingLatest} reporting)`,
-      value: totalLatestRevenue !== null ? formatIndianCurrency(totalLatestRevenue) : '—',
+      label: `Revenue (${companiesReportingActive} reporting)`,
+      value:
+        primaryRevenue !== null
+          ? primaryCurrency === 'INR'
+            ? formatIndianCurrency(primaryRevenue)
+            : `${primaryCurrency} ${primaryRevenue.toLocaleString()}`
+          : '—',
     },
   ];
 
@@ -258,6 +350,16 @@ export default async function PortfolioOverviewPage({ searchParams }: PageProps)
           </div>
         )}
 
+        {/* Explicit Period Selector & Coverage with Currency Separation */}
+        {sortedPeriods.length > 0 && (
+          <PortfolioPeriodSelector
+            periods={Array.from(periodMap.values())}
+            activePeriod={activePeriod}
+            latestPeriod={latestPeriod}
+            totalCompanies={totalCompanies}
+          />
+        )}
+
         {/* KPI Strip: 5 standard cards */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           <KpiCard
@@ -275,33 +377,41 @@ export default async function PortfolioOverviewPage({ searchParams }: PageProps)
           />
 
           <KpiCard
-            label="Latest Reporting Month"
-            value={latestPeriod ? formatPeriod(latestPeriod) : 'Not available'}
-            tooltip="Most recent reporting month across received filings for selected companies"
+            label="Active Aggregate Period"
+            value={activePeriod ? formatPeriod(activePeriod) : 'Not available'}
+            periodBadge={activePeriod === latestPeriod ? 'Latest' : 'Selected'}
+            tooltip={`Aggregated reporting period. ${activePeriod === latestPeriod ? 'Latest available filing across portfolio.' : 'Explicitly selected period.'}`}
             showDelta={false}
           />
 
           <KpiCard
             label="Reporting Rate"
             value={
-              totalCompanies > 0 && latestPeriod
-                ? `${companiesReportingLatest} / ${totalCompanies}`
+              totalCompanies > 0 && activePeriod
+                ? `${companiesReportingActive} / ${totalCompanies}`
                 : 'Not available'
             }
-            tooltip={`Companies that have submitted MIS reports for ${latestPeriod ? formatPeriod(latestPeriod) : 'latest period'} out of ${totalCompanies} selected companies`}
+            tooltip={`Companies that have submitted MIS reports for ${activePeriod ? formatPeriod(activePeriod) : 'this period'} out of ${totalCompanies} selected companies`}
             showDelta={false}
           />
 
           <KpiCard
-            label={`Sum of latest reported revenue · ${companiesReportingLatest} ${companiesReportingLatest === 1 ? 'company' : 'companies'} with data`}
-            value={totalLatestRevenue !== null ? formatIndianCurrency(totalLatestRevenue) : 'Not available'}
-            delta={revenueDelta}
+            label={`Sum of reported revenue (${primaryCurrency}) · ${companiesReportingActive} ${companiesReportingActive === 1 ? 'co.' : 'cos.'} with data`}
+            value={
+              primaryRevenue !== null
+                ? primaryCurrency === 'INR'
+                  ? formatIndianCurrency(primaryRevenue)
+                  : `${primaryCurrency} ${primaryRevenue.toLocaleString()}`
+                : 'Not available'
+            }
+            delta={activeRevenueDelta}
             period={
-              latestPeriod
-                ? `${formatPeriod(latestPeriod)} · ${companiesReportingLatest} with data`
+              activePeriod
+                ? `${formatPeriod(activePeriod)} · ${companiesReportingActive} with data`
                 : undefined
             }
-            tooltip={`Sum of reported revenue across the ${companiesReportingLatest} companies with filings in ${latestPeriod ? formatPeriod(latestPeriod) : 'the latest period'} (out of ${totalCompanies} selected companies). Not portfolio-wide.`}
+            periodBadge={activePeriod === latestPeriod ? 'latest' : undefined}
+            tooltip={`Sum of reported revenue in ${primaryCurrency} across the ${companiesReportingActive} companies with filings in ${activePeriod ? formatPeriod(activePeriod) : 'this period'} (out of ${totalCompanies} selected companies). Kept separate without synthetic FX.`}
             showDelta={true}
           />
         </div>

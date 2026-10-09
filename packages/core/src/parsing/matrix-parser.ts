@@ -419,15 +419,21 @@ export function inferMetricKindAndUnit(
 ): MetricKindAndUnit {
   const norm = label.trim().toLowerCase();
 
-  // 1. Percentage check: suffixed %, or includes %, mix, margin %, gm %, share, roas %
+  // 1. Ratio check: e.g. "Current Ratio", "Quick Ratio", "Debt Equity Ratio", "LTV / CAC Ratio"
+  if (/\b(?:ratio)\b/i.test(norm) && !norm.includes('%')) {
+    return { kind: 'ratio', unit: 'ratio' };
+  }
+
+  // 2. Percentage check: suffixed %, or includes %, mix, share, margin %, gm %, rate %, pct
+  // Must NOT classify monetary "Gross Margin", "Channel Margin", or "Cost Rate" as percent without % or context!
   if (
     norm.includes('%') ||
     norm.includes('margin %') ||
     norm.includes('gm %') ||
-    norm.includes('mix') ||
-    norm.includes('share') ||
     norm.includes('roas %') ||
-    /\b(?:percentage|ratio|ctr|cvr)\b/i.test(norm)
+    norm.includes('rate %') ||
+    /\b(?:percentage|pct|ctr|cvr)\b/i.test(norm) ||
+    /\b(?:share|mix)\b/i.test(norm)
   ) {
     return { kind: 'percent', unit: 'percent' };
   }
@@ -621,6 +627,36 @@ function parseVerticalTimeSeries(
   const metrics: ParsedMatrixMetric[] = [];
   const colCount = Math.max(...rows.map((r) => (Array.isArray(r) ? r.length : 0)));
 
+  // Pre-scan date column to see if grain is truly monthly vs daily
+  const parsedDates: ParsedPeriodInfo[] = [];
+  for (let r = headerRowIdx + 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!Array.isArray(row)) continue;
+    const info = parseReportingPeriodInfo(row[dateCol], sheetYear);
+    if (info) parsedDates.push(info);
+  }
+
+  const dateHeaderStr = String(headerRow[dateCol] || '').toLowerCase();
+  const sheetLower = sheetName.toLowerCase();
+  const nameIndicatesMonthly =
+    sheetLower.includes('month wise') ||
+    sheetLower.includes('month-wise') ||
+    sheetLower.includes('monthly') ||
+    dateHeaderStr.includes('month wise') ||
+    dateHeaderStr.includes('month-wise') ||
+    dateHeaderStr.includes('monthly');
+
+  let isMonthlyGrain = false;
+  if (nameIndicatesMonthly) {
+    isMonthlyGrain = true;
+  } else if (parsedDates.length >= 2) {
+    const uniqueMonths = new Set(parsedDates.map((d) => d.reportingPeriod));
+    const allDaysFirst = parsedDates.every((d) => d.periodDate && d.periodDate.endsWith('-01'));
+    if (uniqueMonths.size === parsedDates.length && allDaysFirst) {
+      isMonthlyGrain = true;
+    }
+  }
+
   for (let r = headerRowIdx + 1; r < rows.length; r++) {
     const row = rows[r];
     if (!Array.isArray(row)) continue;
@@ -628,6 +664,11 @@ function parseVerticalTimeSeries(
     const dateCell = row[dateCol];
     const periodInfo = parseReportingPeriodInfo(dateCell, sheetYear);
     if (!periodInfo) continue;
+
+    const effectiveGranularity = isMonthlyGrain ? 'monthly' : periodInfo.granularity;
+    const effectivePeriodDate = isMonthlyGrain
+      ? `${periodInfo.reportingPeriod}-01`
+      : periodInfo.periodDate;
 
     for (let c = 0; c < colCount; c++) {
       if (c === dateCol) continue;
@@ -675,8 +716,8 @@ function parseVerticalTimeSeries(
         normalizedLabel: normalizeLabel(headerText),
         standardMetricKey: standardKey,
         reportingPeriod: periodInfo.reportingPeriod,
-        periodDate: periodInfo.periodDate,
-        granularity: periodInfo.granularity,
+        periodDate: effectivePeriodDate,
+        granularity: effectiveGranularity,
         value: finalValue,
         rawValue: parsed.rawString,
         unit: metricKind.unit,
@@ -689,6 +730,7 @@ function parseVerticalTimeSeries(
         status: parsed.isError ? 'quarantined' : 'valid',
         validationNotes: parsed.isError ? `Formula error ${parsed.rawString}` : undefined,
         kind: metricKind.kind,
+        periodProvenance: 'source',
       });
     }
   }
@@ -706,9 +748,15 @@ function parseSinglePeriodDimensional(
   sheetScale: ScaleAndCurrency,
   canonicalPeriod: string,
   granularity: 'daily' | 'monthly' | 'quarterly' | 'annual' | 'snapshot' = 'monthly',
-  periodDate?: string
+  periodDate?: string,
+  provenance: 'source' | 'inferred' = 'inferred'
 ): ParsedMatrixMetric[] {
   const metrics: ParsedMatrixMetric[] = [];
+  const defaultPeriodDate =
+    periodDate ??
+    (granularity === 'annual'
+      ? `${canonicalPeriod.split('-')[0]}-03-31`
+      : `${canonicalPeriod}-01`);
 
   // Pattern 1: Magma Dec25 style: Row 0 has ["MIS"|"Cash Flow", "Unit", Dim1, Dim2, ...]
   const row0 = rows[0];
@@ -753,7 +801,7 @@ function parseSinglePeriodDimensional(
           normalizedLabel: normalizeLabel(rawLabel),
           standardMetricKey: standardKey,
           reportingPeriod: canonicalPeriod,
-          periodDate: periodDate ?? `${canonicalPeriod}-01`,
+          periodDate: defaultPeriodDate,
           granularity,
           value: finalValue,
           rawValue: parsed.rawString,
@@ -769,6 +817,7 @@ function parseSinglePeriodDimensional(
           blockLabel: dim.label,
           blockIndex: dim.colIndex - 2,
           kind: metricKind.kind,
+          periodProvenance: provenance,
         });
       }
     }
@@ -817,7 +866,7 @@ function parseSinglePeriodDimensional(
           parentLabel: parentSection || undefined,
           standardMetricKey: standardKey,
           reportingPeriod: canonicalPeriod,
-          periodDate: periodDate ?? `${canonicalPeriod}-01`,
+          periodDate: defaultPeriodDate,
           granularity,
           value: parsed1.num,
           rawValue: parsed1.rawString,
@@ -832,6 +881,7 @@ function parseSinglePeriodDimensional(
           validationNotes: parsed1.isError ? `Formula error ${parsed1.rawString}` : undefined,
           blockLabel: parentSection || undefined,
           kind: metricKind.kind,
+          periodProvenance: provenance,
         });
       }
     }
@@ -847,7 +897,7 @@ function parseSinglePeriodDimensional(
           normalizedLabel: normalizeLabel(shareLabel),
           parentLabel: parentSection || undefined,
           reportingPeriod: canonicalPeriod,
-          periodDate: periodDate ?? `${canonicalPeriod}-01`,
+          periodDate: defaultPeriodDate,
           granularity,
           value: parsed2.num,
           rawValue: parsed2.rawString,
@@ -862,6 +912,7 @@ function parseSinglePeriodDimensional(
           validationNotes: parsed2.isError ? `Formula error ${parsed2.rawString}` : undefined,
           blockLabel: parentSection || undefined,
           kind: 'percent',
+          periodProvenance: provenance,
         });
       }
     }
@@ -1024,13 +1075,15 @@ export function parseMatrixSpreadsheet(
       );
       if (vMetrics.length > 0) {
         allMetrics.push(...vMetrics);
-        sheetLayouts.set(sheetName, 'vertical_daily');
+        const hasDaily = vMetrics.some((m) => m.granularity === 'daily');
+        sheetLayouts.set(sheetName, hasDaily ? 'vertical_daily' : 'vertical_monthly');
         continue;
       }
     }
 
     // --- STRATEGY 3: SINGLE-PERIOD DIMENSIONAL STATEMENT ---
     let detectedPeriodInfo = parseReportingPeriodInfo(sheetName, sheetYear);
+    let dimensionalProvenance: 'source' | 'inferred' = 'inferred';
     if (!detectedPeriodInfo) {
       for (const r of rows.slice(0, 4)) {
         if (!Array.isArray(r)) continue;
@@ -1038,6 +1091,7 @@ export function parseMatrixSpreadsheet(
           const info = parseReportingPeriodInfo(cell, sheetYear);
           if (info) {
             detectedPeriodInfo = info;
+            dimensionalProvenance = 'source';
             break;
           }
         }
@@ -1046,6 +1100,14 @@ export function parseMatrixSpreadsheet(
     }
     const sheetCanonicalPeriod =
       detectedPeriodInfo?.reportingPeriod ?? canonicalFilenamePeriod ?? (sheetYear ? `${sheetYear}-03` : null);
+    const sheetGranularity =
+      detectedPeriodInfo?.granularity ??
+      (canonicalFilenamePeriod && /FY/i.test(canonicalFilenamePeriod) ? 'annual' : 'monthly');
+    const sheetPeriodDate =
+      detectedPeriodInfo?.periodDate ??
+      (sheetGranularity === 'annual' && sheetCanonicalPeriod
+        ? `${sheetCanonicalPeriod.split('-')[0]}-03-31`
+        : undefined);
 
     if (sheetCanonicalPeriod) {
       // Check if rows match dimensional statement
@@ -1062,8 +1124,9 @@ export function parseMatrixSpreadsheet(
           rows,
           sheetScale,
           sheetCanonicalPeriod,
-          detectedPeriodInfo?.granularity ?? 'monthly',
-          detectedPeriodInfo?.periodDate
+          sheetGranularity,
+          sheetPeriodDate,
+          dimensionalProvenance
         );
         if (dimMetrics.length > 0) {
           allMetrics.push(...dimMetrics);

@@ -114,8 +114,8 @@ describe('Milestone 2: Universal Semantic Layouts Regression Suite', () => {
 
       // Sheet 1 is horizontal matrix
       expect(result.sheetLayouts?.get('Month-wise ')).toBe('metric_matrix');
-      // Sheet 2 is vertical date table
-      expect(result.sheetLayouts?.get('Month wise PO Rcvd')).toBe('vertical_daily');
+      // Sheet 2 is vertical date table with monthly grain
+      expect(result.sheetLayouts?.get('Month wise PO Rcvd')).toBe('vertical_monthly');
 
       const poMetric = result.metrics.find(
         (m) =>
@@ -124,6 +124,7 @@ describe('Milestone 2: Universal Semantic Layouts Regression Suite', () => {
           m.rawLabel.trim() === 'PO'
       );
       expect(poMetric).toBeDefined();
+      expect(poMetric?.granularity).toBe('monthly');
       expect(poMetric?.value).toBe(45283150);
       expect(poMetric?.sourceReference).toContain("Sheet 'Month wise PO Rcvd'");
     });

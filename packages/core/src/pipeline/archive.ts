@@ -135,6 +135,23 @@ export function extractArchiveSecurely(
   const maxFileCount = options.maxFileCount ?? 100;
   const maxDepth = options.maxDepth ?? 5;
 
+  // 0. Binary-level Pre-extraction Symlink Check: scan buffer Central Directory headers (PK\x01\x02)
+  // Blocks symlink attack BEFORE unzip or any external processes run
+  const CD_HEADER = Buffer.from([0x50, 0x4b, 0x01, 0x02]);
+  let cdOffset = zipBuffer.indexOf(CD_HEADER);
+  while (cdOffset !== -1) {
+    if (cdOffset + 42 <= zipBuffer.length) {
+      const externalAttr = zipBuffer.readUInt32LE(cdOffset + 38);
+      const unixMode = (externalAttr >>> 16) & 0o170000;
+      if (unixMode === 0o120000) {
+        throw new Error(
+          'Zip-Slip security error: archive contains forbidden symbolic link. Pre-extraction symlink attack blocked before unzip.'
+        );
+      }
+    }
+    cdOffset = zipBuffer.indexOf(CD_HEADER, cdOffset + 4);
+  }
+
   const tmpBaseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mis_secure_zip_'));
   const zipFilePath = path.join(tmpBaseDir, 'archive.zip');
   const extractTargetDir = path.join(tmpBaseDir, 'extracted');
@@ -174,7 +191,7 @@ export function extractArchiveSecurely(
       if (!inTable) continue;
 
       // Match length date time name (flexible on date separator e.g. - or / or .)
-      const match = line.match(/^(\d+)\s+[\d\-\.\/]+\s+[\d:]+\s+(.+)$/);
+      const match = line.match(/^(\d+)\s+[\d./-]+\s+[\d:]+\s+(.+)$/);
       if (!match) continue;
 
       const length = parseInt(match[1]!, 10);
@@ -195,7 +212,7 @@ export function extractArchiveSecurely(
         entryName.includes('\0') ||
         entryName.startsWith('/') ||
         entryName.startsWith('\\') ||
-        entryName.split(/[\/\\]/).includes('..')
+        entryName.split(/[/\\]/).includes('..')
       ) {
         throw new Error(
           `Zip-Slip security error: archive entry path "${entryName}" contains path traversal sequence.`
@@ -228,6 +245,26 @@ export function extractArchiveSecurely(
         throw new Error(
           `File count limit exceeded: archive contains more than ${maxFileCount} entries.`
         );
+      }
+    }
+
+    // Also verify via unzip -Z -s (zipinfo format)
+    try {
+      const zipinfoOutput = execFileSync('unzip', ['-Z', '-s', zipFilePath], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      for (const ziLine of zipinfoOutput.split('\n')) {
+        const trimmed = ziLine.trim();
+        if (/^l[rwx-]{9}\s+/i.test(trimmed)) {
+          throw new Error(
+            'Zip-Slip security error: archive contains forbidden symbolic link. Pre-extraction symlink attack blocked before unzip.'
+          );
+        }
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes('Zip-Slip security error')) {
+        throw err;
       }
     }
 
