@@ -106,8 +106,16 @@ function collectFilesRecursively(
 
     if (entry.isDirectory()) {
       results.push(...collectFilesRecursively(rootDir, fullPath, depth + 1, maxDepth));
-    } else if (entry.isFile()) {
-      results.push(fullPath);
+    } else {
+      const stat = fs.lstatSync(fullPath);
+      if (stat.isSymbolicLink()) {
+        throw new Error(
+          `Zip-Slip security error: archive contains forbidden symbolic link "${entry.name}".`
+        );
+      }
+      if (entry.isFile()) {
+        results.push(fullPath);
+      }
     }
   }
 
@@ -165,8 +173,8 @@ export function extractArchiveSecurely(
       }
       if (!inTable) continue;
 
-      // Match length date time name
-      const match = line.match(/^(\d+)\s+[\d-]+\s+[\d:]+\s+(.+)$/);
+      // Match length date time name (flexible on date separator e.g. - or / or .)
+      const match = line.match(/^(\d+)\s+[\d\-\.\/]+\s+[\d:]+\s+(.+)$/);
       if (!match) continue;
 
       const length = parseInt(match[1]!, 10);
@@ -178,12 +186,16 @@ export function extractArchiveSecurely(
       fileEntriesCount++;
 
       // Zip-Slip Security Check: Path Traversal Defense
+      const normalizedEntry = path.normalize(entryName);
       if (
         entryName.includes('..') ||
+        normalizedEntry.startsWith('..') ||
         path.isAbsolute(entryName) ||
+        path.isAbsolute(normalizedEntry) ||
         entryName.includes('\0') ||
         entryName.startsWith('/') ||
-        entryName.startsWith('\\')
+        entryName.startsWith('\\') ||
+        entryName.split(/[\/\\]/).includes('..')
       ) {
         throw new Error(
           `Zip-Slip security error: archive entry path "${entryName}" contains path traversal sequence.`
@@ -239,11 +251,20 @@ export function extractArchiveSecurely(
 
     const extractedFiles: ExtractedArchiveChild[] = [];
     const seenHashes = new Set<string>();
+    let runningExtractedBytes = 0;
 
     for (const filePath of collectedPaths) {
-      // Re-verify canonical path safety
-      const resolved = path.resolve(filePath);
-      if (!resolved.startsWith(extractTargetDir)) {
+      // Check for symlinks on extracted path
+      const lstat = fs.lstatSync(filePath);
+      if (lstat.isSymbolicLink()) {
+        throw new Error(
+          `Zip-Slip security error: extracted file "${filePath}" is a symbolic link.`
+        );
+      }
+
+      // Re-verify canonical real path safety
+      const resolved = fs.realpathSync(filePath);
+      if (!resolved.startsWith(extractTargetDir + path.sep)) {
         throw new Error(
           `Zip-Slip security error: extracted file "${filePath}" is outside target directory.`
         );
@@ -252,6 +273,17 @@ export function extractArchiveSecurely(
       const relativeEntryPath = path.relative(extractTargetDir, filePath);
       const filename = path.basename(filePath);
       const fileBytes = fs.readFileSync(filePath);
+      runningExtractedBytes += fileBytes.length;
+      if (runningExtractedBytes > maxTotalBytes) {
+        throw new Error(
+          `Total uncompressed size limit exceeded: archive expands to more than ${maxTotalBytes} bytes.`
+        );
+      }
+      if (extractedFiles.length >= maxFileCount) {
+        throw new Error(
+          `File count limit exceeded: archive contains more than ${maxFileCount} entries.`
+        );
+      }
       const sha256 = crypto.createHash('sha256').update(fileBytes).digest('hex');
 
       // Deduplicate identical content inside archive if present

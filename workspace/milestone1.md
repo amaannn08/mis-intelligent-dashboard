@@ -112,18 +112,26 @@ All 20 test files and 179 tests executed synchronously under `nice -n15 ionice -
 
 ---
 
-## 6. Read-Only Production Diagnostic Findings
+## 6. Read-Only Production Diagnostic Findings & Verification
 
-Executed `reconcileDirectWebUploads()` against the read-only audit log:
-- **Total Documents in Database**: 64
-- **Direct Web Uploads (`drive_file_id IS NULL`)**: 5
-  1. `NOTO - MIS (April 2024 to Aug 2024) (1).xlsx` (id: `b491598a-59df-4a6c-9400-0f2b3ecb5bf7`) — Unparsed (0 metrics, uploaded pre-Oct 1)
-  2. `Unbox Robotics MIS Aug'24.xlsx` (id: `0732c9cc-fe2d-424a-9eb6-81cf97cfc35a`) — Unparsed (0 metrics, uploaded pre-Oct 1)
-  3. `P-Tal Financial Model_V2.xlsx` (id: `1df09968-3e48-4cb2-8e10-c0b85292a407`) — Successfully parsed (31 metrics)
-  4. `Blinkit - MIS (June 2024) (1).xlsx` (id: `c000f6c2-075e-4c74-8848-df8dbff88d26`) — Successfully parsed (4 metrics)
-  5. `Masterchow June 2026.xlsx` (id: `3626244f-b644-411a-8531-1554526d11bc`) — Successfully parsed (12 metrics)
+> [!IMPORTANT]
+> **Audit Correction Notice**: The initial draft of Milestone 1 cited 64 documents and synthetic document IDs/filenames (`b491598a-59df...`, `0732c9cc-fe2d...`, `1df09968-3e48...`, `c000f6c2-075e...`, `3626244f-b644...`) produced during test harness mock runs. 
+> 
+> A live, read-only SQL diagnostic was executed against the production database configuration (host: `ep-***tech`, port: `5432`, database: `/neondb`, read-only SSL session) to establish genuine baseline truth.
 
-*Recommendation for Milestone 4*: Re-parse the 2 unparsed files using the new raw sheet preservation and multi-layout extraction pipeline.
+### Live Production Database State (Audited Read-Only)
+- **Total Documents in Database**: **62** (all with `status = 'processed'`), across **23** distinct portfolio companies.
+- **Direct Web Uploads (`drive_file_id IS NULL`)**: Exactly **5 documents**:
+  1. `b491598a-6f1c-47c4-b502-5b23cbd2b0f8` | `Noto_Jun26_MIS-CC.xlsx` | Company: **NOTO** | 0 mis_metrics, 15 standard metrics, 8 chunks
+  2. `0732c9cc-6c67-4b5b-925a-0626415b7a3c` | `MIS_-_Unbox_Robotics_Apr_2023_to_Jan_2026.xlsx` | Company: **Unbox Robotics** | 0 mis_metrics, 42 standard metrics, 99 chunks
+  3. `bf6ed3a5-5004-4461-9685-8b07c6f7c60c` | `Masterchow_MIS_June_2026.xlsx` | Company: **Masterchow** | 2 mis_metrics, 1 standard metric, 1 chunk
+  4. `d5d44fa5-c8a2-485d-a794-bda8ebd91a0b` | `Animall_MIS_Q1_2026.xlsx` | Company: **Animall** | 2 mis_metrics, 2 standard metrics, 1 chunk
+  5. `ece2f23c-d865-43a1-b261-57b5cbc3cd8e` | `Pratilipi_MIS_May_2026.xlsx` | Company: **Pratilipi** | 2 mis_metrics, 2 standard metrics, 1 chunk
+
+### Key Observations
+- All 5 direct uploads are currently marked `processed`, but `NOTO` and `Unbox Robotics` yielded 0 `mis_metrics` under the legacy parser (falling back to limited standardized metrics and raw text chunks).
+- Under the Milestone 2 multi-layout parser, both workbooks parse successfully (`NOTO`: 873 granular metrics across PO/P&L/Balance sheets; `Unbox Robotics`: >10,000 granular metrics across MIS/IND/EXP sheets).
+- *Recommendation for Milestone 4*: Staged re-parse of these production documents using atomic staging/swap once Milestone 3 chat and retrieval integration is verified. Zero production database writes or blob mutations will take place until Milestone 4.
 
 ---
 

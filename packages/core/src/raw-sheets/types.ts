@@ -65,6 +65,7 @@ export interface QueryRawSheetCellsResult {
   totalCellsInSheet: number;
   isUntrustedData: true;
   securityNotice: string;
+  boundedContainerXml?: string;
   coverage: {
     totalMatchingCells: number;
     returnedCellsCount: number;

@@ -10,7 +10,8 @@ export async function saveDocumentRawSheets(
   txOrDb: any,
   documentId: string,
   rawExtraction: RawWorkbookExtraction,
-  semanticMetricsBySheet?: Map<string, number>
+  semanticMetricsBySheet?: Map<string, number>,
+  sheetLayouts?: Map<string, string>
 ): Promise<void> {
   const db = txOrDb || defaultDb;
 
@@ -21,7 +22,8 @@ export async function saveDocumentRawSheets(
   if (rawExtraction.sheets.length > 0) {
     const sheetRows = rawExtraction.sheets.map((s) => {
       const metricCount = semanticMetricsBySheet?.get(s.sheetName) ?? 0;
-      const isSemanticParsed = metricCount > 0;
+      const detectedLayout = sheetLayouts?.get(s.sheetName) || s.detectedLayout || 'unknown';
+      const isSemanticParsed = metricCount > 0 || detectedLayout === 'notes_and_metadata';
 
       return {
         documentId,
@@ -39,7 +41,7 @@ export async function saveDocumentRawSheets(
         errorCells: s.errorCells,
         merges: s.merges,
         headers: s.headers ?? null,
-        detectedLayout: s.detectedLayout,
+        detectedLayout,
         semanticParsed: isSemanticParsed,
         semanticMetricCount: metricCount,
         cells: s.cells,

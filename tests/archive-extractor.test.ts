@@ -110,4 +110,30 @@ with zipfile.ZipFile('${zipPath}', 'w') as z:
       extractArchiveSecurely(garbage);
     }).toThrow(/invalid.*zip|corrupt|failed/i);
   });
+
+  it('detects and blocks archives containing symbolic links', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'symlink_test_'));
+    const zipPath = path.join(tmpDir, 'symlink.zip');
+
+    try {
+      execFileSync('python3', [
+        '-c',
+        `
+import zipfile
+with zipfile.ZipFile('${zipPath}', 'w') as z:
+    zinfo = zipfile.ZipInfo('evil_link')
+    zinfo.create_system = 3
+    zinfo.external_attr = 0o120777 << 16
+    z.writestr(zinfo, '/etc/passwd')
+`,
+      ]);
+
+      const symlinkBuffer = fs.readFileSync(zipPath);
+      expect(() => {
+        extractArchiveSecurely(symlinkBuffer);
+      }).toThrow(/symbolic link/i);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

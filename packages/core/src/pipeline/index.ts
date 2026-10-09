@@ -234,7 +234,7 @@ export async function processDocument(
               parentLabel: m.parentLabel ?? null,
               standardMetricKey: m.standardMetricKey ?? null,
               reportingPeriod: m.reportingPeriod,
-              periodDate: m.reportingPeriod ? `${m.reportingPeriod}-01` : null,
+              periodDate: m.periodDate ?? (m.reportingPeriod ? `${m.reportingPeriod}-01` : null),
               granularity: m.granularity ?? 'monthly',
               value: m.value !== null ? String(m.value) : null,
               rawValue: m.rawValue,
@@ -256,7 +256,13 @@ export async function processDocument(
           }
 
           // Persist durable raw sheets and coverage metadata atomically
-          await saveDocumentRawSheets(tx, documentId, rawExtraction!, metricsBySheet);
+          await saveDocumentRawSheets(
+            tx,
+            documentId,
+            rawExtraction!,
+            metricsBySheet,
+            matrixResult?.sheetLayouts
+          );
         });
       }
 

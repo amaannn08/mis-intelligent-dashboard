@@ -94,7 +94,7 @@ export interface ParsedMatrixMetric {
   standardMetricKey?: string;
   reportingPeriod: string;
   periodDate?: string;
-  granularity: 'monthly' | 'quarterly' | 'annual';
+  granularity: 'daily' | 'monthly' | 'quarterly' | 'annual' | 'snapshot';
   value: number | null;
   rawValue: string;
   unit: string;
@@ -116,4 +116,5 @@ export interface MatrixParseResult {
   metrics: ParsedMatrixMetric[];
   sheetsAnalyzed: string[];
   quarantinedCount: number;
+  sheetLayouts?: Map<string, string>;
 }
