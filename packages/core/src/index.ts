@@ -110,6 +110,11 @@ export {
   processDocument,
   type ProcessDocumentOptions,
 } from './pipeline/index.js';
+export {
+  extractArchiveSecurely,
+  type ArchiveExtractOptions,
+  type ExtractedArchiveChild,
+} from './pipeline/archive.js';
 
 // Dashboard Calculations
 export {
@@ -119,3 +124,6 @@ export {
   type CompanyPeriodRow,
   type BurnEbitdaPoint,
 } from './dashboard/burn-ebitda.js';
+
+// Raw Sheets Preservation & Bounded Tool
+export * from './raw-sheets/index.js';

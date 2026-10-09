@@ -28,7 +28,7 @@ export interface ParsedDocument {
 
 export interface ChunkMetadata {
   company: string;
-  companyId: string;
+  companyId?: string | null;
   documentId: string;
   filename: string;
   reportingPeriod?: string;

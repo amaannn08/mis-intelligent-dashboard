@@ -12,7 +12,7 @@ export interface ChunkingOptions {
 
 export interface ChunkingContext {
   company: string;
-  companyId: string;
+  companyId?: string | null;
   documentId: string;
   reportingPeriod?: string;
 }

@@ -11,7 +11,6 @@ export const documentChunks = pgTable(
       .notNull()
       .references(() => documents.id, { onDelete: 'cascade' }),
     companyId: uuid('company_id')
-      .notNull()
       .references(() => companies.id, { onDelete: 'cascade' }),
     chunkIndex: integer('chunk_index').notNull(),
     content: text('content').notNull(),

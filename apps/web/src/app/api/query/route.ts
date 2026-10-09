@@ -13,6 +13,7 @@ import {
   retrieveRelevantChunks,
   routeQuestion,
   queryMisMetrics,
+  queryRawSheetCells,
   type MetricContextRow,
   type RetrievedChunkRow,
 } from '@mis/core';
@@ -424,6 +425,37 @@ export async function POST(request: NextRequest) {
           parentBlockLabel: parentBlock,
           blockLabel: block,
           period,
+        });
+      },
+    }),
+    query_raw_sheet_cells: tool({
+      description:
+        'Query verbatim raw spreadsheet cells, notes, tables, and exact coordinates (e.g. range A1:D20, or specific sheet/cell) from the durable raw sheet store. Use this to inspect notes, cap tables, unparsed statements, balance sheet schedules, cash flows, or exact formulas and raw values.',
+      inputSchema: z.object({
+        companyName: z.string().optional().describe('Company name e.g. "Masterchow"'),
+        sheetName: z.string().optional().describe('Sheet name e.g. "P&L", "Notes", "Daily"'),
+        range: z.string().optional().describe('Cell range e.g. "A1:D20" or cell coordinate "B5"'),
+        coord: z.string().optional().describe('Exact cell coordinate e.g. "B2"'),
+        searchQuery: z.string().optional().describe('Text to search in raw cell values'),
+        limit: z.number().int().min(1).max(500).default(100).describe('Max cells to return (max 500)'),
+        offset: z.number().int().min(0).default(0).describe('Paging offset'),
+      }),
+      execute: async ({ companyName, sheetName, range, coord, searchQuery, limit, offset }) => {
+        let compId = targetCompanyId || undefined;
+        if (!compId && companyName) {
+          const match = knownCompanies.find(
+            (c) => c.name.toLowerCase() === companyName.toLowerCase() || c.slug.toLowerCase() === companyName.toLowerCase()
+          );
+          if (match) compId = match.id;
+        }
+        return await queryRawSheetCells({
+          companyId: compId,
+          sheetName,
+          range,
+          coord,
+          searchQuery,
+          limit,
+          offset,
         });
       },
     }),

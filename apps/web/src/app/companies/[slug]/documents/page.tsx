@@ -50,7 +50,7 @@ export default async function CompanyDocumentsPage({ params }: PageProps) {
   const formattedDocs: DocumentRow[] = compDocs.map((d) => ({
     id: d.id,
     filename: d.filename,
-    companyId: d.companyId,
+    companyId: d.companyId ?? company.id,
     reportingPeriod: d.reportingPeriod,
     fileType: d.fileType,
     sizeBytes: d.sizeBytes,

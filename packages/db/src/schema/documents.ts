@@ -7,7 +7,6 @@ export const documents = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     companyId: uuid('company_id')
-      .notNull()
       .references(() => companies.id, { onDelete: 'cascade' }),
     filename: text('filename').notNull(),
     storagePath: text('storage_path').notNull(),
@@ -25,14 +24,23 @@ export const documents = pgTable(
     driveFileId: text('drive_file_id'), // Google Drive file ID for sync
     driveFolderPath: text('drive_folder_path'), // e.g. 'MIS FY 26/Fund I/Animall'
     isOldMis: boolean('is_old_mis').default(false).notNull(),
+    parentDocumentId: uuid('parent_document_id').references((): any => documents.id, { onDelete: 'cascade' }),
+    archiveEntryPath: text('archive_entry_path'),
+    isPortfolioTracker: boolean('is_portfolio_tracker').default(false).notNull(),
+    extractionVersion: integer('extraction_version').default(1).notNull(),
+    totalSheets: integer('total_sheets').default(0).notNull(),
+    rawPreserved: boolean('raw_preserved').default(false).notNull(),
     uploadedAt: timestamp('uploaded_at', { withTimezone: true }).defaultNow().notNull(),
     processedAt: timestamp('processed_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
   },
   (table) => [
     uniqueIndex('documents_company_checksum_idx').on(table.companyId, table.checksum),
     index('documents_company_reporting_period_idx').on(table.companyId, table.reportingPeriod),
     index('documents_drive_file_id_idx').on(table.driveFileId),
     index('documents_fund_company_idx').on(table.fund, table.companyId),
+    index('documents_parent_doc_idx').on(table.parentDocumentId),
+    index('documents_is_portfolio_tracker_idx').on(table.isPortfolioTracker),
   ]
 );
 
