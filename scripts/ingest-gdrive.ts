@@ -91,6 +91,7 @@ interface DriveFile {
   fund: string;
   companySlug?: string;
   isOldMis: boolean;
+  isPortfolioTracker?: boolean;
 }
 
 interface IngestOptions {
@@ -275,6 +276,7 @@ async function listSharedDriveRecursive(
         const isOldMis =
           /old\s*mis/i.test(fullPath) || /old\s*version/i.test(item.name);
         const companySlug = matchCompanySlug(fullPath, companiesList);
+        const isPortfolioTracker = !companySlug && (/tracker/i.test(item.name) || currentPath === 'MIS FY 26');
 
         results.push({
           id: item.id,
@@ -282,9 +284,10 @@ async function listSharedDriveRecursive(
           mimeType: item.mimeType,
           size: item.size,
           folderPath: currentPath,
-          fund: currentFund,
+          fund: isPortfolioTracker ? 'Portfolio' : currentFund,
           companySlug: companySlug ?? undefined,
           isOldMis,
+          isPortfolioTracker,
         });
       }
     }
@@ -374,7 +377,9 @@ export async function runIngestion(options: IngestOptions) {
     '../packages/db/src/index.js'
   );
   const { processDocument } = await import('../packages/core/src/pipeline/index.js');
-  const { extractPeriodFromFilename } = await import('../packages/core/src/index.js');
+  const { extractPeriodFromFilename, extractArchiveSecurely } = await import(
+    '../packages/core/src/index.js'
+  );
 
   const allCompanies = await db.select().from(companies);
   const companyBySlug = new Map<string, Company>();
@@ -396,8 +401,8 @@ export async function runIngestion(options: IngestOptions) {
   );
   console.log(`Scanned ${allFiles.length} candidate files in shared drive.`);
 
-  // Filter files (exclude root files without company)
-  let targetFiles = allFiles.filter((f) => !!f.companySlug);
+  // Filter files (include root portfolio trackers)
+  let targetFiles = allFiles.filter((f) => !!f.companySlug || f.isPortfolioTracker);
   if (options.fund) {
     targetFiles = targetFiles.filter(
       (f) => f.fund.toLowerCase() === options.fund!.toLowerCase()
@@ -466,7 +471,7 @@ export async function runIngestion(options: IngestOptions) {
     console.log(`\n${prefix} Processing: ${file.name}`);
 
     const company = file.companySlug ? companyBySlug.get(file.companySlug) : null;
-    if (!company) {
+    if (!company && !file.isPortfolioTracker) {
       console.warn(`${prefix} ⚠️ Skipped: No matching company found in database for path '${file.folderPath}'`);
       results.push({
         file,
@@ -483,15 +488,14 @@ export async function runIngestion(options: IngestOptions) {
       const sha256 = crypto.createHash('sha256').update(downloaded.buffer).digest('hex');
 
       // 2. Check if identical document already exists and is processed
+      const docMatchCondition = company
+        ? and(eq(documents.companyId, company.id), eq(documents.checksum, sha256))
+        : and(eq(documents.isPortfolioTracker, true), eq(documents.checksum, sha256));
+
       const [existingDoc] = await db
         .select()
         .from(documents)
-        .where(
-          and(
-            eq(documents.companyId, company.id),
-            eq(documents.checksum, sha256)
-          )
-        );
+        .where(docMatchCondition);
 
       let beforeMisMetricsCount = 0;
       if (existingDoc) {
@@ -514,39 +518,35 @@ export async function runIngestion(options: IngestOptions) {
         downloaded.mimeType === 'application/zip'
       ) {
         console.log(`${prefix} 📦 Unpacking ZIP archive: ${downloaded.filename}...`);
-        const tmpZipDir = path.join(os.tmpdir(), `mis_zip_${Date.now()}`);
-        fs.mkdirSync(tmpZipDir, { recursive: true });
-        const tmpZipFile = path.join(tmpZipDir, 'archive.zip');
-        fs.writeFileSync(tmpZipFile, downloaded.buffer);
-
-        try {
-          execFileSync('unzip', ['-o', tmpZipFile, '-d', tmpZipDir]);
-          const extractedFiles = fs.readdirSync(tmpZipDir).filter((fn) => !fn.endsWith('.zip'));
-
-          // Ingest original zip as a document record
-          let zipBlobUrl: string | null = null;
-          const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
-          if (blobToken && !blobToken.includes('placeholder')) {
-            try {
-              const zipBlob = await put(`mis-drive/${company.slug}/${downloaded.filename}`, downloaded.buffer, {
-                access: 'private',
-                token: blobToken,
-              });
-              zipBlobUrl = zipBlob.url;
-            } catch (err: unknown) {
-              const msg = err instanceof Error ? err.message : String(err);
-              console.warn(`${prefix} ⚠️ Vercel Blob upload skipped/failed for zip (${msg}). Continuing with document_blobs bytea & disk mirror fallback.`);
-            }
+        // Ingest original zip as a document record
+        let zipBlobUrl: string | null = null;
+        const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
+        if (blobToken && !blobToken.includes('placeholder')) {
+          try {
+            const zipBlob = await put(
+              `mis-drive/${company ? company.slug : 'portfolio'}/${downloaded.filename}`,
+              downloaded.buffer,
+              { access: 'private', token: blobToken }
+            );
+            zipBlobUrl = zipBlob.url;
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.warn(
+              `${prefix} ⚠️ Vercel Blob upload skipped/failed for zip (${msg}). Continuing with document_blobs bytea & disk mirror fallback.`
+            );
           }
+        }
 
-          const uploadsDir = path.resolve(process.cwd(), 'uploads');
-          fs.mkdirSync(uploadsDir, { recursive: true });
-          const safeZipFilename = downloaded.filename.replace(/[^a-zA-Z0-9._-]/g, '_');
-          const zipDiskPath = path.join(uploadsDir, `${file.id}_${safeZipFilename}`);
-          fs.writeFileSync(zipDiskPath, downloaded.buffer);
+        const uploadsDir = path.resolve(process.cwd(), 'uploads');
+        fs.mkdirSync(uploadsDir, { recursive: true });
+        const safeZipFilename = downloaded.filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const zipDiskPath = path.join(uploadsDir, `${file.id}_${safeZipFilename}`);
+        fs.writeFileSync(zipDiskPath, downloaded.buffer);
 
-          const [zipDoc] = await db.insert(documents).values({
-            companyId: company.id,
+        const [zipDoc] = await db
+          .insert(documents)
+          .values({
+            companyId: company ? company.id : null,
             filename: downloaded.filename,
             storagePath: zipDiskPath,
             blobUrl: zipBlobUrl,
@@ -560,111 +560,128 @@ export async function runIngestion(options: IngestOptions) {
             driveFileId: file.id,
             driveFolderPath: file.folderPath,
             isOldMis: file.isOldMis,
+            isPortfolioTracker: !!file.isPortfolioTracker,
             originalRetained: true,
-          }).onConflictDoUpdate({
+          })
+          .onConflictDoUpdate({
             target: [documents.companyId, documents.checksum],
             set: {
               storagePath: zipDiskPath,
               reportingPeriod: extractPeriodFromFilename(downloaded.filename),
               updatedAt: new Date(),
-              status: 'processed'
+              status: 'processed',
             },
-          }).returning();
+          })
+          .returning();
 
-          if (zipDoc) {
-            await db
-              .insert(documentBlobs)
-              .values({
-                documentId: zipDoc.id,
+        if (zipDoc) {
+          await db
+            .insert(documentBlobs)
+            .values({
+              documentId: zipDoc.id,
+              data: downloaded.buffer,
+              sizeBytes: downloaded.buffer.length,
+            })
+            .onConflictDoUpdate({
+              target: documentBlobs.documentId,
+              set: {
                 data: downloaded.buffer,
                 sizeBytes: downloaded.buffer.length,
-              })
-              .onConflictDoUpdate({
-                target: documentBlobs.documentId,
-                set: {
-                  data: downloaded.buffer,
-                  sizeBytes: downloaded.buffer.length,
-                },
-              });
+              },
+            });
+        }
+
+        // Recursively and securely unpack nested files (supporting xlsx, xls, and pdf)
+        const archiveResult = extractArchiveSecurely(downloaded.buffer, {
+          parentDocumentId: zipDoc ? zipDoc.id : undefined,
+        });
+        console.log(
+          `${prefix} 📦 Securely unpacked ${archiveResult.totalFilesFound} child files from ZIP archive.`
+        );
+
+        for (const child of archiveResult.files) {
+          if (!['xlsx', 'xls', 'pdf'].includes(child.fileType) || child.filename.startsWith('~$')) {
+            continue;
           }
 
-          // Ingest nested xlsx files
-          for (const nestedName of extractedFiles) {
-            if (!/\.xlsx?$/i.test(nestedName) || nestedName.startsWith('~$')) continue;
-            const nestedPath = path.join(tmpZipDir, nestedName);
-            const nestedBytes = fs.readFileSync(nestedPath);
-            const nestedSha = crypto.createHash('sha256').update(nestedBytes).digest('hex');
-
-            let nestedBlobUrl: string | null = null;
-            if (blobToken && !blobToken.includes('placeholder')) {
-              try {
-                const b = await put(`mis-drive/${company.slug}/${nestedName}`, nestedBytes, {
-                  access: 'private',
-                  token: blobToken,
-                });
-                nestedBlobUrl = b.url;
-              } catch (e: unknown) {
-                const msg = e instanceof Error ? e.message : String(e);
-                console.warn(`${prefix} ⚠️ Vercel Blob upload skipped/failed for nested file (${msg}). Continuing with document_blobs bytea & disk mirror fallback.`);
-              }
+          let nestedBlobUrl: string | null = null;
+          if (blobToken && !blobToken.includes('placeholder')) {
+            try {
+              const b = await put(
+                `mis-drive/${company ? company.slug : 'portfolio'}/${child.filename}`,
+                child.buffer,
+                { access: 'private', token: blobToken }
+              );
+              nestedBlobUrl = b.url;
+            } catch (e: unknown) {
+              const msg = e instanceof Error ? e.message : String(e);
+              console.warn(
+                `${prefix} ⚠️ Vercel Blob upload skipped/failed for nested file (${msg}). Continuing with document_blobs bytea & disk mirror fallback.`
+              );
             }
+          }
 
-            const safeNestedName = nestedName.replace(/[^a-zA-Z0-9._-]/g, '_');
-            const nestedDiskPath = path.join(uploadsDir, `${file.id}_${safeNestedName}`);
-            fs.writeFileSync(nestedDiskPath, nestedBytes);
+          const safeEntryName = child.archiveEntryPath.replace(/[^a-zA-Z0-9._-]/g, '_');
+          const nestedDiskPath = path.join(uploadsDir, `${file.id}_${safeEntryName}`);
+          fs.writeFileSync(nestedDiskPath, child.buffer);
 
-            const [nestedDoc] = await db.insert(documents).values({
-              companyId: company.id,
-              filename: nestedName,
+          const [nestedDoc] = await db
+            .insert(documents)
+            .values({
+              companyId: company ? company.id : null,
+              filename: child.filename,
               storagePath: nestedDiskPath,
               blobUrl: nestedBlobUrl,
-              mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-              fileType: 'xlsx',
-              reportingPeriod: extractPeriodFromFilename(nestedName),
-              sizeBytes: nestedBytes.length,
-              checksum: nestedSha,
+              mime: child.mime,
+              fileType: child.fileType,
+              reportingPeriod: extractPeriodFromFilename(child.filename),
+              sizeBytes: child.sizeBytes,
+              checksum: child.sha256,
               status: 'pending',
               fund: file.fund,
-              driveFileId: `${file.id}_${nestedName}`,
+              driveFileId: `${file.id}_${safeEntryName}`,
               driveFolderPath: file.folderPath,
               isOldMis: file.isOldMis,
               originalRetained: true,
-            }).onConflictDoUpdate({
+              parentDocumentId: zipDoc ? zipDoc.id : null,
+              archiveEntryPath: child.archiveEntryPath,
+            })
+            .onConflictDoUpdate({
               target: [documents.companyId, documents.checksum],
               set: {
                 updatedAt: new Date(),
                 status: 'pending',
                 storagePath: nestedDiskPath,
-                reportingPeriod: extractPeriodFromFilename(nestedName),
+                reportingPeriod: extractPeriodFromFilename(child.filename),
+                parentDocumentId: zipDoc ? zipDoc.id : null,
+                archiveEntryPath: child.archiveEntryPath,
               },
-            }).returning();
+            })
+            .returning();
 
-            if (nestedDoc) {
-              await db
-                .insert(documentBlobs)
-                .values({
-                  documentId: nestedDoc.id,
-                  data: nestedBytes,
-                  sizeBytes: nestedBytes.length,
-                })
-                .onConflictDoUpdate({
-                  target: documentBlobs.documentId,
-                  set: {
-                    data: nestedBytes,
-                    sizeBytes: nestedBytes.length,
-                  },
-                });
+          if (nestedDoc) {
+            await db
+              .insert(documentBlobs)
+              .values({
+                documentId: nestedDoc.id,
+                data: child.buffer,
+                sizeBytes: child.sizeBytes,
+              })
+              .onConflictDoUpdate({
+                target: documentBlobs.documentId,
+                set: {
+                  data: child.buffer,
+                  sizeBytes: child.sizeBytes,
+                },
+              });
 
-              console.log(`${prefix} ⚙️ Processing nested: ${nestedName}...`);
-              await processDocument(nestedDoc.id);
-            }
+            console.log(`${prefix} ⚙️ Processing nested child: ${child.archiveEntryPath}...`);
+            await processDocument(nestedDoc.id);
           }
-
-          results.push({ file, status: 'processed' });
-          continue;
-        } finally {
-          fs.rmSync(tmpZipDir, { recursive: true, force: true });
         }
+
+        results.push({ file, status: 'processed' });
+        continue;
       }
 
       // 3. Upload to Vercel Blob if token is available
@@ -674,7 +691,7 @@ export async function runIngestion(options: IngestOptions) {
       const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
       if (blobToken && !blobToken.includes('placeholder')) {
         try {
-          const blobPath = `mis-drive/${company.slug}/${downloaded.filename}`;
+          const blobPath = `mis-drive/${company ? company.slug : 'portfolio'}/${downloaded.filename}`;
           const blobResult = await put(blobPath, downloaded.buffer, {
             access: 'private',
             token: blobToken,
@@ -701,7 +718,7 @@ export async function runIngestion(options: IngestOptions) {
       const [doc] = await db
         .insert(documents)
         .values({
-          companyId: company.id,
+          companyId: company ? company.id : null,
           filename: downloaded.filename,
           storagePath: diskPath,
           blobUrl,
@@ -716,6 +733,7 @@ export async function runIngestion(options: IngestOptions) {
           driveFileId: file.id,
           driveFolderPath: file.folderPath,
           isOldMis: file.isOldMis,
+          isPortfolioTracker: !!file.isPortfolioTracker,
           originalRetained: true,
         })
         .onConflictDoUpdate({
@@ -725,12 +743,14 @@ export async function runIngestion(options: IngestOptions) {
             driveFileId: file.id,
             driveFolderPath: file.folderPath,
             isOldMis: file.isOldMis,
+            isPortfolioTracker: !!file.isPortfolioTracker,
             storagePath: diskPath,
             reportingPeriod: extractPeriodFromFilename(downloaded.filename),
             blobUrl: blobUrl ?? documents.blobUrl,
             blobPathname: blobPathname ?? documents.blobPathname,
             originalRetained: true,
             status: 'pending',
+            updatedAt: new Date(),
           },
         })
         .returning();

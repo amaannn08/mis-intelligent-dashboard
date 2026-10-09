@@ -13,6 +13,7 @@ import {
   misMetrics,
 } from '@mis/db';
 import { parseFile, parseMatrixSpreadsheet, extractPeriodFromFilename } from '../parsing/index.js';
+import { extractRawWorkbookData, saveDocumentRawSheets } from '../raw-sheets/index.js';
 import { extractMetrics } from '../extraction/index.js';
 import { chunkDocument } from '../chunking/index.js';
 import { embedTexts, type EmbedOptions } from '../embeddings/index.js';
@@ -88,12 +89,16 @@ export async function processDocument(
       throw new Error(`Document with ID '${documentId}' not found.`);
     }
 
-    const [company] = await db
-      .select()
-      .from(companies)
-      .where(eq(companies.id, doc.companyId));
+    let company: typeof companies.$inferSelect | undefined;
+    if (doc.companyId) {
+      const [comp] = await db
+        .select()
+        .from(companies)
+        .where(eq(companies.id, doc.companyId));
+      company = comp;
+    }
 
-    if (!company) {
+    if (!company && !doc.isPortfolioTracker) {
       throw new Error(`Company with ID '${doc.companyId}' not found.`);
     }
 
@@ -189,51 +194,71 @@ export async function processDocument(
     let quarantinedCount = 0;
 
     let matrixResult: ReturnType<typeof parseMatrixSpreadsheet> | undefined;
+    let rawExtraction: ReturnType<typeof extractRawWorkbookData> | undefined;
+
     if (isSpreadsheet) {
-      matrixResult = parseMatrixSpreadsheet(fileBytes, doc.filename);
-      granularMisMetricsCount = matrixResult.metrics.length;
-      quarantinedCount = matrixResult.quarantinedCount;
+      rawExtraction = extractRawWorkbookData(fileBytes, doc.filename);
 
-      const metricsToInsert = matrixResult.metrics;
+      if (doc.isPortfolioTracker) {
+        // Reviewer correction: Do NOT invent portfolio-overview company financials.
+        // Root tracker is portfolio-scoped source; metadata queryable without contaminating company KPIs.
+        await db.transaction(async (tx) => {
+          await tx.delete(misMetrics).where(eq(misMetrics.documentId, documentId));
+          await saveDocumentRawSheets(tx, documentId, rawExtraction!);
+        });
+      } else {
+        matrixResult = parseMatrixSpreadsheet(fileBytes, doc.filename);
+        granularMisMetricsCount = matrixResult.metrics.length;
+        quarantinedCount = matrixResult.quarantinedCount;
 
-      // Idempotently and atomically replace mis_metrics for this document
-      await db.transaction(async (tx) => {
-        await tx.delete(misMetrics).where(eq(misMetrics.documentId, documentId));
-
-        // Batch insert into mis_metrics
-        const BATCH_SIZE = 300;
-        for (let i = 0; i < metricsToInsert.length; i += BATCH_SIZE) {
-          const batch = metricsToInsert.slice(i, i + BATCH_SIZE).map((m) => ({
-            documentId: doc.id,
-            companyId: doc.companyId,
-            fund: doc.fund ?? null,
-            sheetName: m.sheetName,
-            rawLabel: m.rawLabel,
-            normalizedLabel: m.normalizedLabel,
-            parentLabel: m.parentLabel ?? null,
-            standardMetricKey: m.standardMetricKey ?? null,
-            reportingPeriod: m.reportingPeriod,
-            periodDate: m.reportingPeriod ? `${m.reportingPeriod}-01` : null,
-            granularity: m.granularity ?? 'monthly',
-            value: m.value !== null ? String(m.value) : null,
-            rawValue: m.rawValue,
-            unit: m.unit,
-            currency: m.currency ?? null,
-            scale: m.scale,
-            rowIndex: m.rowIndex,
-            colIndex: m.colIndex,
-            sourceReference: m.sourceReference,
-            confidence: String(m.confidence),
-            status: m.status,
-            validationNotes: m.validationNotes ?? null,
-            blockLabel: m.blockLabel ?? null,
-            blockIndex: m.blockIndex ?? null,
-            parentBlockLabel: m.parentBlockLabel ?? null,
-            kind: m.kind ?? null,
-          }));
-          await tx.insert(misMetrics).values(batch);
+        const metricsToInsert = matrixResult.metrics;
+        const metricsBySheet = new Map<string, number>();
+        for (const m of metricsToInsert) {
+          metricsBySheet.set(m.sheetName, (metricsBySheet.get(m.sheetName) || 0) + 1);
         }
-      });
+
+        // Idempotently and atomically replace mis_metrics and raw sheets for this document
+        await db.transaction(async (tx) => {
+          await tx.delete(misMetrics).where(eq(misMetrics.documentId, documentId));
+
+          // Batch insert into mis_metrics
+          const BATCH_SIZE = 300;
+          for (let i = 0; i < metricsToInsert.length; i += BATCH_SIZE) {
+            const batch = metricsToInsert.slice(i, i + BATCH_SIZE).map((m) => ({
+              documentId: doc.id,
+              companyId: doc.companyId!,
+              fund: doc.fund ?? null,
+              sheetName: m.sheetName,
+              rawLabel: m.rawLabel,
+              normalizedLabel: m.normalizedLabel,
+              parentLabel: m.parentLabel ?? null,
+              standardMetricKey: m.standardMetricKey ?? null,
+              reportingPeriod: m.reportingPeriod,
+              periodDate: m.reportingPeriod ? `${m.reportingPeriod}-01` : null,
+              granularity: m.granularity ?? 'monthly',
+              value: m.value !== null ? String(m.value) : null,
+              rawValue: m.rawValue,
+              unit: m.unit,
+              currency: m.currency ?? null,
+              scale: m.scale,
+              rowIndex: m.rowIndex,
+              colIndex: m.colIndex,
+              sourceReference: m.sourceReference,
+              confidence: String(m.confidence),
+              status: m.status,
+              validationNotes: m.validationNotes ?? null,
+              blockLabel: m.blockLabel ?? null,
+              blockIndex: m.blockIndex ?? null,
+              parentBlockLabel: m.parentBlockLabel ?? null,
+              kind: m.kind ?? null,
+            }));
+            await tx.insert(misMetrics).values(batch);
+          }
+
+          // Persist durable raw sheets and coverage metadata atomically
+          await saveDocumentRawSheets(tx, documentId, rawExtraction!, metricsBySheet);
+        });
+      }
 
       // Group standard KPIs by (key, period) with deterministic prioritization
       const kpisByPeriod = new Map<string, ParsedMatrixMetric>();
@@ -256,9 +281,11 @@ export async function processDocument(
         return 1;
       };
 
-      const validKpiMetrics = matrixResult.metrics.filter(
-        (m) => m.status === 'valid' && m.value !== null && m.standardMetricKey
-      );
+      const validKpiMetrics = matrixResult
+        ? matrixResult.metrics.filter(
+            (m) => m.status === 'valid' && m.value !== null && m.standardMetricKey
+          )
+        : [];
 
       for (const m of validKpiMetrics) {
         const groupKey = `${m.standardMetricKey}_${m.reportingPeriod}`;
@@ -290,7 +317,7 @@ export async function processDocument(
     let extractedMetrics: ExtractedMetric[] = [];
     if (matrixExtractedKpis.length > 0) {
       extractedMetrics = matrixExtractedKpis;
-    } else {
+    } else if (!doc.isPortfolioTracker) {
       const defs = await db.select().from(metricDefinitions);
       const fallbackMetrics: ExtractedMetric[] = await extractMetrics(
         parsed,
@@ -313,7 +340,7 @@ export async function processDocument(
       await db
         .insert(metrics)
         .values({
-          companyId: doc.companyId,
+          companyId: doc.companyId!,
           documentId: doc.id,
           metricKey: m.metricKey,
           value: String(m.value),
@@ -388,7 +415,7 @@ export async function processDocument(
                 : m.scale && m.scale !== 'units'
                 ? `${m.unit} ${m.scale}`
                 : m.unit;
-            return `${company.name} | ${m.sheetName} | ${blockPath} > ${m.rawLabel} | ${m.reportingPeriod}: ${m.value} (${unitScale})`;
+            return `${company?.name || 'Portfolio'} | ${m.sheetName} | ${blockPath} > ${m.rawLabel} | ${m.reportingPeriod}: ${m.value} (${unitScale})`;
           });
 
           parsed.blocks.unshift({
@@ -406,8 +433,8 @@ export async function processDocument(
     const chunks = chunkDocument(
       parsed,
       {
-        company: company.name,
-        companyId: company.id,
+        company: company?.name || 'Portfolio',
+        companyId: company?.id ?? null,
         documentId: doc.id,
         reportingPeriod: canonicalPeriod || undefined,
       },
@@ -445,7 +472,7 @@ export async function processDocument(
 
         await db.insert(documentChunks).values({
           documentId: doc.id,
-          companyId: doc.companyId,
+          companyId: doc.companyId ?? undefined,
           chunkIndex: chunk.chunkIndex,
           content: chunk.content,
           tokenCount: chunk.tokenCount,
