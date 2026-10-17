@@ -76,6 +76,11 @@ export function parseReportingPeriodInfo(
   const rawStr = String(val).trim();
   if (!rawStr || rawStr.length > 80) return null;
 
+  // Fast path: if string contains neither digits nor month substring, it cannot be a reporting period
+  if (!/[0-9]/.test(rawStr) && !/(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(rawStr)) {
+    return null;
+  }
+
   // Clean comparative headers: strip newlines and common prefixes like "As at", "Consolidated as on", "ended on"
   const s = rawStr
     .replace(/[\r\n\t]+/g, ' ')
@@ -929,7 +934,7 @@ export function parseMatrixSpreadsheet(
   filename: string
 ): MatrixParseResult {
   const nodeBuf = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
-  const wb = XLSX.read(nodeBuf, { type: 'buffer' });
+  const wb = XLSX.read(nodeBuf, { type: 'buffer', dense: true });
 
   const allMetrics: ParsedMatrixMetric[] = [];
   const sheetsAnalyzed: string[] = [];
@@ -958,10 +963,24 @@ export function parseMatrixSpreadsheet(
   for (const sn of wb.SheetNames) {
     const s = wb.Sheets[sn];
     if (!s || !s['!ref']) continue;
-    const sampleRows = XLSX.utils
-      .sheet_to_json<unknown[]>(s, { header: 1, raw: false, defval: '', blankrows: false })
-      .slice(0, 5);
-    const snText = `${sn} ${sampleRows.map((r) => (Array.isArray(r) ? r.join(' ') : '')).join(' ')}`;
+    let snText = sn;
+    if (s['!data']) {
+      const top5 = s['!data'].slice(0, 5);
+      const textParts: string[] = [];
+      for (const r of top5) {
+        if (!r) continue;
+        for (const cell of r) {
+          if (cell && cell.w) textParts.push(cell.w);
+          else if (cell && cell.v !== undefined) textParts.push(String(cell.v));
+        }
+      }
+      snText += ' ' + textParts.join(' ');
+    } else {
+      const sampleRows = XLSX.utils
+        .sheet_to_json<unknown[]>(s, { header: 1, raw: false, defval: '', blankrows: false })
+        .slice(0, 5);
+      snText += ' ' + sampleRows.map((r) => (Array.isArray(r) ? r.join(' ') : '')).join(' ');
+    }
     const detected = detectScaleAndCurrency(snText);
     if (detected.scaleName !== 'units' || detected.isExplicitCurrency) {
       workbookScale = detected;

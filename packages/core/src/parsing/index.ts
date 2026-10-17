@@ -9,6 +9,7 @@ export { parseDocx } from './docx.js';
 export {
   parseMatrixSpreadsheet,
   parseReportingPeriodCell,
+  parseReportingPeriodInfo,
   detectScaleAndCurrency,
   parseRawCellValue,
   normalizeLabel,

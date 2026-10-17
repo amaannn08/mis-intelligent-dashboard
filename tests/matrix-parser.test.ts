@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
   parseMatrixSpreadsheet,
   parseReportingPeriodCell,
+  parseReportingPeriodInfo,
   detectScaleAndCurrency,
   parseRawCellValue,
   normalizeLabel,
@@ -23,6 +24,56 @@ describe('Matrix Parser: Helpers & Normalisation', () => {
     expect(parseReportingPeriodCell('FY26')).toBe('2026-03');
     expect(parseReportingPeriodCell('March', 2023)).toBe('2023-03');
     // Excel serial date for 2024-04-01 is 45383
+    expect(parseReportingPeriodCell(45383)).toBe('2024-04');
+  });
+
+  it('fast path for reporting period detection rejects non-period strings instantly without regression', () => {
+    const nonPeriodSamples = [
+      'Particulars',
+      'Employee Benefit Expenses',
+      'Server Hosting Charges - AWS Cloud Infrastructure',
+      'Marketing and Customer Acquisition Spend',
+      'Legal and Professional Fees',
+      'Finance and Interest Charges',
+      'Total Operating Expenditure',
+      'Depreciation and Amortization',
+      'Cost of Goods Sold (COGS)',
+      'Rent, Rates & Taxes',
+      'Net Profit / (Loss) Before Exceptional Items',
+      'Foreign Exchange Loss / (Gain)',
+      'Office Supplies and Printing',
+      'Audit and Compliance Retainers',
+      'Direct Logistics & Shipping Expenses',
+      'Cash and Bank Balances',
+      'Sundry Debtors / Accounts Receivable',
+      'Trade Payables & Accrued Liabilities',
+    ];
+
+    for (const label of nonPeriodSamples) {
+      expect(parseReportingPeriodInfo(label, 2026)).toBeNull();
+      expect(parseReportingPeriodCell(label, 2026)).toBeNull();
+    }
+
+    // Benchmark throughput: 50,000 evaluations across non-period labels must complete rapidly (< 1000ms)
+    const t0 = performance.now();
+    for (let i = 0; i < 50000; i++) {
+      const sample = nonPeriodSamples[i % nonPeriodSamples.length];
+      parseReportingPeriodInfo(sample, 2026);
+    }
+    const elapsedMs = performance.now() - t0;
+    expect(elapsedMs).toBeLessThan(1000);
+
+    // Verify valid reporting periods continue to parse accurately
+    expect(parseReportingPeriodCell('Apr-24')).toBe('2024-04');
+    expect(parseReportingPeriodCell("Apr '24")).toBe('2024-04');
+    expect(parseReportingPeriodCell('April 2024')).toBe('2024-04');
+    expect(parseReportingPeriodCell('2025-06')).toBe('2025-06');
+    expect(parseReportingPeriodCell('30/4/2022')).toBe('2022-04');
+    expect(parseReportingPeriodCell('06/2025')).toBe('2025-06');
+    expect(parseReportingPeriodCell('Q1 FY26')).toBe('2025-06');
+    expect(parseReportingPeriodCell('Q4 FY26')).toBe('2026-03');
+    expect(parseReportingPeriodCell('FY26')).toBe('2026-03');
+    expect(parseReportingPeriodCell('March', 2023)).toBe('2023-03');
     expect(parseReportingPeriodCell(45383)).toBe('2024-04');
   });
 
