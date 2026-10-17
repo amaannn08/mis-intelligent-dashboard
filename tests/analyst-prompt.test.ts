@@ -255,6 +255,34 @@ describe('Coverage Rendering', () => {
     expect(coverageLine).toContain('1 with MIS on file (NOTO)');
     expect(coverageLine).toContain('periods available: 2025-06');
   });
+
+  it('reports portfolio-wide coverage, not just the retrieval-scoped company, when portfolioCompaniesWithData is given', () => {
+    // Retrieval for this question was scoped to Simple Viral Games only, but
+    // the portfolio actually has MIS on file for Masterchow and NOTO too.
+    const coverage = computeCoverage({
+      structuredRows: [
+        {
+          companyId: 'svg-1',
+          companyName: 'Simple Viral Games',
+          metricKey: 'revenue',
+          value: 1320000,
+          unit: 'currency',
+          reportingPeriod: '2025-08',
+          sourceReference: 'Sheet 1',
+        },
+      ],
+      totalPortfolioCompanies: 28,
+      portfolioCompaniesWithData: ['Simple Viral Games', 'Masterchow', 'NOTO'],
+    });
+
+    expect(coverage.companiesWithData).toEqual(['Masterchow', 'NOTO', 'Simple Viral Games']);
+
+    const coverageLine = formatCoverageBlock(coverage);
+    expect(coverageLine).toContain('3 with MIS on file');
+    expect(coverageLine).toContain('Masterchow');
+    // Must not claim Simple Viral Games is the only company with MIS on file.
+    expect(coverageLine).not.toContain('1 with MIS on file');
+  });
 });
 
 describe('Conversation History Invariants', () => {

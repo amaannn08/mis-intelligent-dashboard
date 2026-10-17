@@ -140,33 +140,48 @@ export function formatCompactMetricValue(
 
 export function formatPeriod(period: string | null | undefined): string {
   if (!period) return '—';
-  // Handles 'YYYY-MM'
-  const match = period.match(/^(\d{4})-(\d{2})$/);
-  if (!match) return period;
+  // Handles 'YYYY-MM' (month must be 01-12; otherwise this is not a calendar
+  // month — e.g. a fiscal-year range like "2025-26" — and falls through below).
+  const match = period.match(/^(\d{4})-(0[1-9]|1[0-2])$/);
+  if (match) {
+    const year = match[1];
+    const monthIdx = parseInt(match[2]!, 10) - 1;
+    const monthNames = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return `${monthNames[monthIdx]} ${year}`;
+  }
 
-  const year = match[1];
-  const monthIdx = parseInt(match[2], 10) - 1;
-  const monthNames = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-  ];
+  // Fiscal-year range, e.g. "2025-26" -> "FY2025-26"
+  const fyMatch = period.match(/^(\d{4})-(\d{2})$/);
+  if (fyMatch) {
+    return `FY${fyMatch[1]}-${fyMatch[2]}`;
+  }
 
-  return `${monthNames[monthIdx] || match[2]} ${year}`;
+  return period;
 }
 
 export function formatShortPeriod(period: string | null | undefined): string {
   if (!period) return '—';
-  const match = period.match(/^(\d{4})-(\d{2})$/);
-  if (!match || !match[1] || !match[2]) return period;
+  const match = period.match(/^(\d{4})-(0[1-9]|1[0-2])$/);
+  if (match) {
+    const yearShort = match[1]!.slice(-2);
+    const monthIdx = parseInt(match[2]!, 10) - 1;
+    const monthNames = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return `${monthNames[monthIdx]}'${yearShort}`;
+  }
 
-  const yearShort = match[1].slice(-2);
-  const monthIdx = parseInt(match[2], 10) - 1;
-  const monthNames = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-  ];
+  // Fiscal-year range, e.g. "2025-26" -> "FY25-26"
+  const fyMatch = period.match(/^(\d{4})-(\d{2})$/);
+  if (fyMatch) {
+    return `FY${fyMatch[1]!.slice(-2)}-${fyMatch[2]}`;
+  }
 
-  return `${monthNames[monthIdx] || match[2]}'${yearShort}`;
+  return period;
 }
 
 export function calculateDelta(

@@ -1,4 +1,30 @@
 import type { ChatSessionSummary } from './chat-types.js';
+import type { Citation } from '@/components/ai/citation-list';
+
+/**
+ * Filters a citation list down to only the citations whose [n] marker
+ * actually appears in the final answer text. The server sends every
+ * candidate citation up-front (before the model has finished answering),
+ * so without this the "Sources & Citations" chips on the live/streaming
+ * message include sources the answer never referenced — inconsistent with
+ * what gets persisted (and re-shown) once the session reloads.
+ */
+export function filterCitationsByText(citations: Citation[], text: string): Citation[] {
+  if (!citations || citations.length === 0 || !text) return citations;
+
+  const citedIndices = new Set<number>();
+  for (const match of text.matchAll(/\[(\d+)\]/g)) {
+    const n = parseInt(match[1]!, 10);
+    if (!isNaN(n)) citedIndices.add(n);
+  }
+
+  if (citedIndices.size === 0) return citations;
+
+  const filtered = citations.filter((c) => typeof c.index === 'number' && citedIndices.has(c.index));
+  // If none of the citations' indices matched (e.g. index missing on some
+  // entries), fall back to the original list rather than showing nothing.
+  return filtered.length > 0 ? filtered : citations;
+}
 
 export function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr);

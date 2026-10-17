@@ -17,6 +17,7 @@ export * from './history.js';
 export * from './prompt.js';
 export * from './charts.js';
 export * from './metrics-query.js';
+export * from './company-match.js';
 
 export interface AnswerQueryOptions {
   question: string;
@@ -214,6 +215,8 @@ export interface HybridRAGContextOptions {
   detectedCompanyNames?: string[];
   scopeCompanyName?: string;
   totalPortfolioCompanies?: number;
+  /** Full portfolio-wide list of companies with MIS on file (see computeCoverage). */
+  portfolioCompaniesWithData?: string[];
 }
 
 /**
@@ -291,6 +294,7 @@ export function buildHybridRAGPrompt(options: HybridRAGContextOptions): {
     detectedCompanyNames = [],
     scopeCompanyName,
     totalPortfolioCompanies,
+    portfolioCompaniesWithData,
   } = options;
 
   const historyBlock = formatConversationHistory(historyMessages);
@@ -300,6 +304,7 @@ export function buildHybridRAGPrompt(options: HybridRAGContextOptions): {
     structuredRows,
     documentRows,
     totalPortfolioCompanies,
+    portfolioCompaniesWithData,
   });
 
   const systemPrompt = buildAnalystSystemPrompt({

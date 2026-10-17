@@ -15,6 +15,7 @@ import {
   queryMisMetrics,
   queryRawSheetCells,
   discoverRawSheets,
+  resolveCompanyByName,
   type MetricContextRow,
   type RetrievedChunkRow,
 } from '@mis/core';
@@ -142,6 +143,42 @@ export async function POST(request: NextRequest) {
       .where(isNull(companies.archivedAt));
   } catch (err) {
     console.error('Failed to load known companies:', err);
+  }
+
+  // Resolves a company name (as supplied by the LLM via a tool call, or detected
+  // in the question) against the known-companies list using normalized matching
+  // (handles spacing/punctuation/typo variants like "master chow" -> "Masterchow").
+  // An explicitly named company always takes precedence over the session scope.
+  function resolveToolCompany(
+    companyName: string | undefined,
+    fallbackCompanyId: string | null
+  ): { companyId: string | undefined; companyName: string | undefined } {
+    if (companyName) {
+      const match = resolveCompanyByName(companyName, knownCompanies);
+      if (match) {
+        return { companyId: match.id, companyName: match.name };
+      }
+    }
+    return { companyId: fallbackCompanyId || undefined, companyName };
+  }
+
+  // 2b. Portfolio-wide coverage: which companies have ANY MIS data on file,
+  // independent of what gets retrieved/scoped for this specific question.
+  // This prevents the model from claiming "only company X has MIS on file"
+  // just because the question was routed/scoped to company X.
+  let portfolioCompaniesWithData: string[] = [];
+  try {
+    const { rows } = await pool.query(
+      `SELECT DISTINCT c.name FROM companies c
+       WHERE c.id IN (
+         SELECT company_id FROM mis_metrics
+         UNION SELECT company_id FROM metrics
+         UNION SELECT company_id FROM document_chunks
+       );`
+    );
+    portfolioCompaniesWithData = rows.map((r: { name: string }) => r.name);
+  } catch (err) {
+    console.error('Failed to load portfolio-wide coverage:', err);
   }
 
   // 3. Route question deterministically
@@ -291,17 +328,26 @@ export async function POST(request: NextRequest) {
       question
     );
 
+  // When a product/category/channel breakdown is found, the company-level
+  // revenue trend chart is the wrong visual for the question (it answers
+  // "how much revenue" instead of "which product/category") and juxtaposing
+  // monthly and cumulative/annual figures on one axis is misleading. Suppress
+  // the generic metric chart below once a breakdown table is rendered instead.
+  let foundCategoryBreakdown = false;
+
   if (isBreakdownQuestion && (targetCompanyId || detectedCompanyNames.length > 0)) {
     try {
       const targetMetric = metricKeys[0] === 'gross_revenue' ? 'gross_revenue' : 'net_revenue';
+      const breakdownCompany = resolveToolCompany(detectedCompanyNames[0], targetCompanyId);
       const misRes = await queryMisMetrics({
-        companyId: targetCompanyId || undefined,
-        companyName: detectedCompanyNames[0],
+        companyId: breakdownCompany.companyId,
+        companyName: breakdownCompany.companyName,
         metric: targetMetric,
         limit: 25,
       });
 
       if (misRes.rankedCategories.length > 0) {
+        foundCategoryBreakdown = true;
         const topCat = misRes.rankedCategories[0];
         let breakdownSection = `\n### Granular Category / Segment Breakdown from mis_metrics (${misRes.companyName}):\n`;
         breakdownSection += `Source: Sheet '${misRes.authoritativeSheet || 'Category'}' in '${misRes.authoritativeDocument || ''}'. Provenance: ${topCat?.scaleProvenance}.\n`;
@@ -378,14 +424,18 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // 8. Build deterministic chart payload from retrieved structured metric rows
-  const chartPayload = buildChartPayload({
-    structuredRows,
-    metricKeys,
-    targetCompanyId,
-    detectedCompanyNames,
-    question,
-  });
+  // 8. Build deterministic chart payload from retrieved structured metric rows.
+  // Skip it when a category/product breakdown table is already rendered above —
+  // a company-level revenue trend chart doesn't answer a "which product" question.
+  const chartPayload = foundCategoryBreakdown
+    ? { charts: [] }
+    : buildChartPayload({
+        structuredRows,
+        metricKeys,
+        targetCompanyId,
+        detectedCompanyNames,
+        question,
+      });
 
   // 9. Build hybrid RAG prompt with structured metrics, grouped document excerpts, and conversation history
   let scopeCompanyName: string | undefined;
@@ -402,6 +452,7 @@ export async function POST(request: NextRequest) {
     detectedCompanyNames,
     scopeCompanyName,
     totalPortfolioCompanies: knownCompanies.length || 28,
+    portfolioCompaniesWithData,
   });
 
   const deepseekApiKey = process.env.DEEPSEEK_API_KEY;
@@ -425,17 +476,11 @@ export async function POST(request: NextRequest) {
         offset: z.number().int().min(0).default(0),
       }),
       execute: async ({ companyName, documentId, limit, offset }) => {
-        let compId = targetCompanyId || undefined;
-        if (!compId && companyName) {
-          const match = knownCompanies.find(
-            (c) => c.name.toLowerCase() === companyName.toLowerCase() || c.slug.toLowerCase() === companyName.toLowerCase()
-          );
-          if (match) compId = match.id;
-        }
+        const resolved = resolveToolCompany(companyName, targetCompanyId);
         try {
           return await discoverRawSheets({
-            companyId: compId,
-            companyName,
+            companyId: resolved.companyId,
+            companyName: resolved.companyName,
             documentId,
             limit,
             offset,
@@ -470,16 +515,10 @@ export async function POST(request: NextRequest) {
         textLimit: z.number().int().min(1).max(5000).default(1000).describe('Max characters per cell to return (max 5000)'),
       }),
       execute: async ({ companyName, sheetName, range, coord, searchQuery, limit, offset, textOffset, textLimit }) => {
-        let compId = targetCompanyId || undefined;
-        if (!compId && companyName) {
-          const match = knownCompanies.find(
-            (c) => c.name.toLowerCase() === companyName.toLowerCase() || c.slug.toLowerCase() === companyName.toLowerCase()
-          );
-          if (match) compId = match.id;
-        }
+        const resolved = resolveToolCompany(companyName, targetCompanyId);
         try {
           return await queryRawSheetCells({
-            companyId: compId,
+            companyId: resolved.companyId,
             sheetName,
             range,
             coord,
@@ -524,17 +563,9 @@ export async function POST(request: NextRequest) {
         limit: z.number().int().min(1).max(200).default(50),
       }),
       execute: async ({ companyName, metricKeys, period, periodStart, periodEnd, granularity, limit }) => {
-        let compId = targetCompanyId || undefined;
-        let compName = companyName;
-        if (!compId && companyName) {
-          const match = knownCompanies.find(
-            (c) => c.name.toLowerCase() === companyName.toLowerCase() || c.slug.toLowerCase() === companyName.toLowerCase()
-          );
-          if (match) {
-            compId = match.id;
-            compName = match.name;
-          }
-        }
+        const resolved = resolveToolCompany(companyName, targetCompanyId);
+        const compId = resolved.companyId;
+        const compName = resolved.companyName;
 
         const conditions: string[] = [];
         const params: unknown[] = [];
@@ -635,9 +666,10 @@ export async function POST(request: NextRequest) {
         period: z.string().optional().describe('Specific period filter YYYY-MM e.g. "2024-04"'),
       }),
       execute: async ({ companyName, metric, parentBlock, block, period }) => {
+        const resolved = resolveToolCompany(companyName, targetCompanyId);
         return await queryMisMetrics({
-          companyName,
-          companyId: targetCompanyId || undefined,
+          companyName: resolved.companyName,
+          companyId: resolved.companyId,
           metric,
           parentBlockLabel: parentBlock,
           blockLabel: block,
@@ -653,7 +685,7 @@ export async function POST(request: NextRequest) {
       system: systemPrompt,
       prompt: question,
       tools,
-      stopWhen: stepCountIs(3),
+      stopWhen: stepCountIs(5),
       temperature: 0.1,
       onFinish: async (event) => {
         if (sessionId) {
@@ -687,9 +719,23 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const sanitizedCitations = allCitations.filter(
+    const validCitations = allCitations.filter(
       (c) => typeof c.index === 'number' && c.index > 0
     );
+
+    // De-duplicate the source list shown in the UI by document: a single
+    // document's chunks are retrieved multiple times (e.g. 7+ chunks from
+    // the same MIS file), which previously rendered as 7+ near-identical
+    // "Sources & Citations" chips. Keep the lowest-index occurrence per
+    // document so the chip still points at a real citation marker in the
+    // streamed answer.
+    const seenDocuments = new Set<string>();
+    const sanitizedCitations = validCitations.filter((c) => {
+      const docKey = c.documentId || c.filename || String(c.index);
+      if (seenDocuments.has(docKey)) return false;
+      seenDocuments.add(docKey);
+      return true;
+    });
 
     return result.toTextStreamResponse({
       headers: {

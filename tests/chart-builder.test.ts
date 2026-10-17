@@ -233,4 +233,24 @@ describe('Chart Builder: buildChartPayload', () => {
     expect(lastPoint.value).toBe(expectedLastRow.value);
     expect(lastPoint.value).toBe(34567890.55); // exact floating-point precision, no rounding drift
   });
+
+  it('excludes fiscal-year/annual-granularity periods (e.g. "2025-26") from the monthly trend chart', () => {
+    const mixedGranularityRows: MetricContextRow[] = [
+      { companyId: 'c1', companyName: 'SVG', metricKey: 'revenue', value: 1320000, unit: 'currency', reportingPeriod: '2025-08', sourceReference: 'P&L' },
+      // Annual/fiscal-year row — must not be plotted as a bar alongside the monthly figure above.
+      { companyId: 'c1', companyName: 'SVG', metricKey: 'revenue', value: 35200000, unit: 'currency', reportingPeriod: '2025-26', sourceReference: 'P&L' },
+    ];
+
+    const payload = buildChartPayload({
+      structuredRows: mixedGranularityRows,
+      targetCompanyId: 'c1',
+      metricKeys: ['revenue'],
+      question: 'SVG revenue',
+    });
+
+    expect(payload.charts.length).toBe(1);
+    const periods = payload.charts[0]!.series[0]!.points.map((p) => p.period);
+    expect(periods).toEqual(['2025-08']);
+    expect(periods).not.toContain('2025-26');
+  });
 });

@@ -138,8 +138,15 @@ export function buildChartPayload(options: BuildChartPayloadOptions): ChartPaylo
 
   const byMetric = new Map<string, Map<string, CompanyData>>();
 
+  // Only strict calendar-month periods ('YYYY-MM', month 01-12) belong on this
+  // monthly trend chart. Annual/fiscal-year rows (e.g. '2025-26') use a
+  // different granularity and must not be plotted as a bar alongside monthly
+  // figures — doing so both mislabels the axis and compares incomparable totals.
+  const MONTHLY_PERIOD_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
   for (const row of filteredRows) {
     if (!row.metricKey || !row.reportingPeriod) continue;
+    if (!MONTHLY_PERIOD_RE.test(row.reportingPeriod.trim())) continue;
 
     const numVal = typeof row.value === 'string' ? Number(row.value) : row.value;
     if (isNaN(numVal)) continue;

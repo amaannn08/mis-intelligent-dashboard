@@ -18,17 +18,25 @@ export interface KeyFigureChip {
 
 function formatShortPeriod(period: string): string {
   if (!period) return '';
-  const match = period.match(/^(\d{4})-(\d{2})$/);
-  if (!match || !match[1] || !match[2]) return period;
+  // Month must be 01-12; otherwise this isn't a calendar month (e.g. a
+  // fiscal-year range like "2025-26") and must not be mislabelled as "26'25".
+  const match = period.match(/^(\d{4})-(0[1-9]|1[0-2])$/);
+  if (match) {
+    const yearShort = match[1]!.slice(-2);
+    const monthIdx = parseInt(match[2]!, 10) - 1;
+    const monthNames = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return `${monthNames[monthIdx]}'${yearShort}`;
+  }
 
-  const yearShort = match[1].slice(-2);
-  const monthIdx = parseInt(match[2], 10) - 1;
-  const monthNames = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-  ];
+  const fyMatch = period.match(/^(\d{4})-(\d{2})$/);
+  if (fyMatch) {
+    return `FY${fyMatch[1]!.slice(-2)}-${fyMatch[2]}`;
+  }
 
-  return `${monthNames[monthIdx] || match[2]}'${yearShort}`;
+  return period;
 }
 
 export function extractKeyFigures(charts?: ChartConfig[]): KeyFigureChip[] {

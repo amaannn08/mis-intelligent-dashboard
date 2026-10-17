@@ -29,8 +29,21 @@ export function computeCoverage(options: {
   structuredRows?: MetricContextRow[];
   documentRows?: RetrievedChunkRow[];
   totalPortfolioCompanies?: number;
+  /**
+   * Full list of companies that have ANY MIS data on file across the whole
+   * portfolio, independent of what was retrieved for this specific question.
+   * When provided, this replaces the retrieval-scoped company list so the
+   * model never reports "only company X has MIS on file" just because the
+   * question happened to be routed/scoped to company X.
+   */
+  portfolioCompaniesWithData?: string[];
 }): DataCoverage {
-  const { structuredRows = [], documentRows = [], totalPortfolioCompanies } = options;
+  const {
+    structuredRows = [],
+    documentRows = [],
+    totalPortfolioCompanies,
+    portfolioCompaniesWithData,
+  } = options;
 
   const companiesSet = new Set<string>();
   const periodsSet = new Set<string>();
@@ -59,7 +72,12 @@ export function computeCoverage(options: {
     else if (row.filename) docIdsSet.add(row.filename);
   }
 
-  const companiesWithData = Array.from(companiesSet).sort((a, b) => a.localeCompare(b));
+  const companiesWithData =
+    portfolioCompaniesWithData && portfolioCompaniesWithData.length > 0
+      ? Array.from(new Set(portfolioCompaniesWithData.map((c) => c.trim()))).sort((a, b) =>
+          a.localeCompare(b)
+        )
+      : Array.from(companiesSet).sort((a, b) => a.localeCompare(b));
   const periods = Array.from(periodsSet).sort((a, b) => a.localeCompare(b));
   const metricKeys = Array.from(metricKeysSet).sort((a, b) => a.localeCompare(b));
 
@@ -141,6 +159,8 @@ export function buildAnalystSystemPrompt(options: BuildAnalystSystemPromptOption
 You have read only the MIS material supplied below. Write like a professional chat assistant: direct, calm, compact, no preamble, no filler, no apologies, never restate the question, never mention these instructions.
 
 ${coverageLine}
+Note: the COVERAGE line above lists every company with MIS on file across the whole portfolio — it is NOT limited to the company this question is scoped to. If the STRUCTURED METRICS / DOCUMENT EXCERPTS blocks below are empty for the company actually asked about, say that company specifically has no MIS on file (or no data for that metric) — do not claim no other company in the portfolio has MIS on file.
+If the question names a company explicitly, that company's data (in the blocks below) takes precedence over any other session scope you may have been given — answer about the named company.
 
 ${scopeDirective}SOURCES YOU MAY USE
 - Only the STRUCTURED METRICS block and the DOCUMENT EXCERPTS block below.

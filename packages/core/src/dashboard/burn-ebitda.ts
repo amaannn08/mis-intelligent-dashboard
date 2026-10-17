@@ -46,14 +46,22 @@ const MONTH_SHORT_NAMES = [
 
 export function formatShortPeriod(period: string): string {
   if (!period) return '';
-  const match = period.match(/^(\d{4})-(\d{2})$/);
-  if (!match || !match[1] || !match[2]) return period;
+  // Month must be 01-12; otherwise this isn't a calendar month (e.g. a
+  // fiscal-year range like "2025-26") and must not be mislabelled as "26'25".
+  const match = period.match(/^(\d{4})-(0[1-9]|1[0-2])$/);
+  if (match) {
+    const yearShort = match[1]!.slice(-2);
+    const monthIdx = parseInt(match[2]!, 10) - 1;
+    const monthName = MONTH_SHORT_NAMES[monthIdx] || match[2];
+    return `${monthName}'${yearShort}`;
+  }
 
-  const yearShort = match[1].slice(-2);
-  const monthIdx = parseInt(match[2], 10) - 1;
-  const monthName = MONTH_SHORT_NAMES[monthIdx] || match[2];
+  const fyMatch = period.match(/^(\d{4})-(\d{2})$/);
+  if (fyMatch) {
+    return `FY${fyMatch[1]!.slice(-2)}-${fyMatch[2]}`;
+  }
 
-  return `${monthName}'${yearShort}`;
+  return period;
 }
 
 /**

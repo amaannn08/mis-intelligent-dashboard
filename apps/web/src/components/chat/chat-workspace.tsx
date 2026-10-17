@@ -9,6 +9,7 @@ import { ChatSidebar } from './chat-sidebar';
 import { ChatThread } from './chat-thread';
 import { ChatComposer } from './chat-composer';
 import { CitationDrawer } from './citation-drawer';
+import { filterCitationsByText } from './chat-helpers';
 import {
   Menu,
   PanelLeft,
@@ -485,12 +486,14 @@ export function ChatWorkspace({ initialCompanies }: ChatWorkspaceProps = {}) {
         setStreamingText(accumulatedText);
       }
 
-      // Finalize assistant message
+      // Finalize assistant message. Only show sources the answer actually
+      // cited — parsedCitations is the full retrieval candidate list sent
+      // before the model finished answering.
       const finalAssistantMsg: ChatMessage = {
         id: `assistant-${Date.now()}`,
         role: 'assistant',
         content: accumulatedText,
-        citations: parsedCitations,
+        citations: filterCitationsByText(parsedCitations, accumulatedText),
         charts: parsedCharts,
         createdAt: new Date().toISOString(),
       };
@@ -513,7 +516,7 @@ export function ChatWorkspace({ initialCompanies }: ChatWorkspaceProps = {}) {
             id: `assistant-${Date.now()}`,
             role: 'assistant',
             content: `${streamingText} *(generation stopped)*`,
-            citations: streamingCitations,
+            citations: filterCitationsByText(streamingCitations, streamingText),
             charts: streamingCharts,
             createdAt: new Date().toISOString(),
           };

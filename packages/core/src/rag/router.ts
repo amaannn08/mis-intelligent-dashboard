@@ -1,3 +1,5 @@
+import { detectCompaniesInText } from './company-match.js';
+
 export interface KnownCompany {
   id: string;
   name: string;
@@ -138,50 +140,9 @@ export function routeQuestion(
   const { sessionCompanyId = null, knownCompanies = [] } = options;
   const q = question.trim();
 
-  // 1. Company detection
-  const detectedCompanyMap = new Map<string, KnownCompany>();
-
-  for (const comp of knownCompanies) {
-    const candidates: string[] = [];
-
-    // Full name
-    candidates.push(comp.name);
-
-    // Parenthetical alias extraction, e.g. "Flent (Slaash)" -> "Slaash" and "Flent"
-    const parenMatch = comp.name.match(/\(([^)]+)\)/);
-    if (parenMatch && parenMatch[1]) {
-      candidates.push(parenMatch[1].trim());
-      const baseName = comp.name.replace(/\([^)]+\)/g, '').trim();
-      if (baseName) candidates.push(baseName);
-    }
-
-    // Slug
-    if (comp.slug) {
-      candidates.push(comp.slug);
-      const slugWords = comp.slug.replace(/-/g, ' ').trim();
-      if (slugWords !== comp.slug) {
-        candidates.push(slugWords);
-      }
-    }
-
-    // First word of company name if distinct and >= 3 characters
-    const firstWord = comp.name.split(/\s+/)[0]?.replace(/[^\w]/g, '');
-    if (firstWord && firstWord.length >= 3 && !['the', 'and', 'for', 'inc'].includes(firstWord.toLowerCase())) {
-      candidates.push(firstWord);
-    }
-
-    // Check if any candidate matches question with word boundary
-    for (const cand of candidates) {
-      if (!cand || cand.length < 2) continue;
-      const pattern = new RegExp(`(^|\\b)${escapeRegExp(cand)}(\\b|$)`, 'i');
-      if (pattern.test(q)) {
-        detectedCompanyMap.set(comp.id, comp);
-        break;
-      }
-    }
-  }
-
-  const detectedCompanies = Array.from(detectedCompanyMap.values());
+  // 1. Company detection: normalized (spacing/punctuation/case-insensitive) substring
+  // matching plus a small edit-distance fallback for typos. See detectCompaniesInText.
+  const detectedCompanies = detectCompaniesInText(q, knownCompanies);
   const detectedCompanyNames = detectedCompanies.map((c) => c.name);
 
   // Resolved companyId:

@@ -211,6 +211,14 @@ describe('Reconciliation Tests: computeBurnEbitdaSeries', () => {
     expect(formatShortPeriod('')).toBe('');
   });
 
+  it('does not mislabel a fiscal-year range (e.g. "2025-26") as month 26 (regression for "26\'25" bug)', () => {
+    expect(formatShortPeriod('2025-26')).toBe('FY25-26');
+    expect(formatShortPeriod('2025-26')).not.toContain("26'25");
+    // Month must be a valid calendar month (01-12).
+    expect(formatShortPeriod('2025-00')).toBe('FY25-00');
+    expect(formatShortPeriod('2025-13')).toBe('FY25-13');
+  });
+
   it('returns empty array when rows are empty or all revenues are zero/null', () => {
     expect(computeBurnEbitdaSeries([])).toEqual([]);
     const allZeroRev: CompanyPeriodRow[] = [
