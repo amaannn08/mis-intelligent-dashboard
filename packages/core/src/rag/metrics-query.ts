@@ -44,6 +44,8 @@ export interface MetricAggregationItem {
   sheetName?: string;
   sourceDocument?: string;
   scaleProvenance?: string;
+  /** Extra descriptor fields from a wide entity table, e.g. { sku_code, sub_category }. */
+  attributes?: Record<string, string>;
 }
 
 export interface MetricDetailRow {
@@ -57,6 +59,8 @@ export interface MetricDetailRow {
   scale: string;
   sheetName: string;
   sourceReference: string;
+  /** Extra descriptor fields from a wide entity table, e.g. { sku_code, sub_category }. */
+  attributes?: Record<string, string>;
 }
 
 export interface QueryMisMetricsResult {
@@ -321,17 +325,19 @@ export async function queryMisMetrics(
       SELECT DISTINCT ON (mm.block_label)
         mm.block_label,
         mm.reporting_period AS latest_period,
-        ROUND(CAST(mm.value AS numeric), 2) AS latest_value
+        ROUND(CAST(mm.value AS numeric), 2) AS latest_value,
+        mm.attributes
       FROM mis_metrics mm
       JOIN companies c ON c.id = mm.company_id
       JOIN documents d ON d.id = mm.document_id
       WHERE ${whereSql} AND mm.block_label IS NOT NULL
       ORDER BY mm.block_label, mm.reporting_period DESC
     )
-    SELECT 
+    SELECT
       bs.*,
       lv.latest_period,
-      lv.latest_value
+      lv.latest_value,
+      lv.attributes
     FROM block_summary bs
     LEFT JOIN latest_vals lv ON lv.block_label = bs.block_label
     ORDER BY bs.total_value DESC
@@ -389,12 +395,13 @@ export async function queryMisMetrics(
         scale !== 'units'
           ? `Source scale '${scale}' (${mult}x multiplier, currency: ${currencyStr}) recorded for sheet '${r.sheet_name}' in '${r.filename}'`
           : `Scale unstated in source sheet '${r.sheet_name}' in '${r.filename}' (treated as 1:1 units, currency: ${currencyStr})`,
+      attributes: r.attributes ?? undefined,
     };
   });
 
   // 7. Recent detail rows
   const detailSql = `
-    SELECT 
+    SELECT
       mm.block_label,
       mm.parent_block_label,
       mm.raw_label AS metric_label,
@@ -404,7 +411,8 @@ export async function queryMisMetrics(
       mm.currency,
       mm.scale,
       mm.sheet_name,
-      mm.source_reference
+      mm.source_reference,
+      mm.attributes
     FROM mis_metrics mm
     JOIN companies c ON c.id = mm.company_id
     WHERE ${whereSql}
@@ -424,6 +432,7 @@ export async function queryMisMetrics(
     scale: r.scale,
     sheetName: r.sheet_name,
     sourceReference: r.source_reference,
+    attributes: r.attributes ?? undefined,
   }));
 
   const top = rankedCategories[0];

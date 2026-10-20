@@ -380,6 +380,83 @@ describe('Matrix Parser: Real Portfolio Spreadsheets', () => {
     expect(gmv?.reportingPeriod).toBe('2026-06');
   });
 
+  it('parses a wide SKU/product descriptor table into per-product blockLabel + attributes (Masterchow "Product Net Sales" pattern)', () => {
+    const XLSX = require('xlsx');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['NET Revenue', '', '', ''],
+      ['SKU Code', 'Product', 'Category', 'Sub Category', 'Apr-24', 'May-24', 'Jun-24'],
+      ['CO-9340', 'Masterchow Sichuan Chilli Oil 170 GM', 'Condiments', 'Inhouse', 10.68, 12.57, 15.83],
+      ['WWN-3089', 'Masterchow Whole Wheat Noodles 300 GM', 'Stick Noodles', 'Trading', 13.01, 17.25, 23.61],
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, 'Product Net Sales');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const result = parseMatrixSpreadsheet(buf, 'Masterchow_MIS.xlsx');
+    const sichuan = result.metrics.filter(
+      (m) => m.sheetName === 'Product Net Sales' && m.blockLabel === 'Masterchow Sichuan Chilli Oil 170 GM'
+    );
+    expect(sichuan.length).toBe(3); // Apr/May/Jun
+
+    const apr = sichuan.find((m) => m.reportingPeriod === '2024-04');
+    expect(apr).toBeDefined();
+    expect(apr?.rawLabel).toBe('NET Revenue'); // metric name comes from the title row, not the SKU
+    expect(apr?.standardMetricKey).toBe('revenue');
+    expect(apr?.parentBlockLabel).toBe('Condiments'); // category becomes the parent, not the sheet title
+    expect(apr?.attributes).toEqual({ sku_code: 'CO-9340', sub_category: 'Inhouse' });
+    expect(apr?.value).toBe(10.68); // no scale indicator in this minimal fixture -> units, unscaled
+
+    const noodles = result.metrics.find(
+      (m) => m.sheetName === 'Product Net Sales' && m.blockLabel === 'Masterchow Whole Wheat Noodles 300 GM' && m.reportingPeriod === '2024-05'
+    );
+    expect(noodles?.parentBlockLabel).toBe('Stick Noodles');
+    expect(noodles?.attributes).toEqual({ sku_code: 'WWN-3089', sub_category: 'Trading' });
+  });
+
+  it('does not misclassify a label + sparse serial-number/footnote column as a wide descriptor table (regression)', () => {
+    const XLSX = require('xlsx');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['Sl No', 'Particulars', 'Apr-2024', 'May-2024', 'Jun-2024'],
+      [1, 'Literature Platform Revenue', 44387772, 44541881, 44203647],
+      [2, 'Advertisement Income', 3461227, 3393698, 2592290],
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, 'Actual CFS');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const result = parseMatrixSpreadsheet(buf, 'Pratilipi_MIS.xlsx');
+    const litRev = result.metrics.find(
+      (m) => m.sheetName === 'Actual CFS' && m.normalizedLabel.includes('literature_platform_revenue')
+    );
+    expect(litRev).toBeDefined();
+    expect(litRev?.rawLabel).toBe('Literature Platform Revenue');
+    expect(litRev?.attributes).toBeUndefined();
+    const apr = result.metrics.find((m) => m === litRev);
+    expect(apr?.reportingPeriod).toBe('2024-04');
+    expect(apr?.value).toBe(44387772);
+  });
+
+  it('does not misclassify a label + dense free-text explanation column as a wide descriptor table (regression)', () => {
+    const XLSX = require('xlsx');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['Particulars', 'Explanation', 'Jan-24', 'Feb-24'],
+      ['Total Revenue', 'Sum of primary health plans', 6947537, 8065671],
+      ['Primary Health', 'Revenue earned at hubs', 899874, 992612],
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, 'MIS Template_INR');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const result = parseMatrixSpreadsheet(buf, 'Clinikk_MIS.xlsx');
+    const totalRev = result.metrics.find(
+      (m) => m.sheetName === 'MIS Template_INR' && m.normalizedLabel === 'total_revenue' && m.reportingPeriod === '2024-01'
+    );
+    expect(totalRev).toBeDefined();
+    expect(totalRev?.value).toBe(6947537);
+    expect(totalRev?.attributes).toBeUndefined();
+    expect(totalRev?.blockLabel).toBeUndefined(); // "Particulars" is a generic placeholder, not a grouping dimension
+  });
+
   it('handles mixed-unit workbook: scale inheritance does not override explicit per-sheet units or count/percent rows', () => {
     const XLSX = require('xlsx');
     const wb = XLSX.utils.book_new();

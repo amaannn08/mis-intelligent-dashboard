@@ -485,6 +485,72 @@ interface SheetBlock {
   blockLabel?: string;
   blockIndex: number;
   periods: Array<{ colIndex: number; periodInfo: ParsedPeriodInfo }>;
+  /**
+   * All leading text columns seen before the first period column in this
+   * block's header row, in column order (always includes labelCol's own
+   * header as the first entry). When this has more than one entry, the
+   * header row describes a wide entity/descriptor table (e.g.
+   * "SKU Code | Product | Category | Sub Category | Apr-24 | ...") rather
+   * than a single constant grouping label (e.g. "Blinkit | Apr-24 | ...").
+   */
+  headerCols: Array<{ colIndex: number; header: string }>;
+}
+
+/**
+ * Normalizes a descriptor column header to an attribute key, e.g.
+ * "Sub Category" -> "sub_category".
+ */
+function attributeKeyFromHeader(header: string): string {
+  return normalizeLabel(header) || 'attribute';
+}
+
+/**
+ * Whether a header column is a plausible entity-attribute column (e.g.
+ * "Product", "Category", "SKU Code") as opposed to a generic row-label
+ * placeholder ("Particulars"), a serial/row-reference number ("Sl No",
+ * "Note No."), or free-text commentary ("Explanation", "Remarks") — none
+ * of which describe a per-row entity and must never trigger (or pollute)
+ * the wide-descriptor-table path.
+ */
+function isDescriptorCandidate(header: string): boolean {
+  if (isGenericTableHeader(header)) return false;
+  const h = header.trim().toLowerCase();
+  if (/^(?:explanation|description|notes?|remarks?|comments?)$/.test(h)) return false;
+  if (/^(?:sl?\.?\s*no\.?|s\/n|row\s*no\.?|serial\s*no\.?|#)$/.test(h)) return false;
+  return true;
+}
+
+/**
+ * Picks the "name" descriptor column (the human-readable entity name, e.g.
+ * a product name) and the "category" descriptor column (an exact
+ * "Category" header, excluding "Sub Category") from a wide descriptor
+ * table's header columns. Falls back sensibly when no column looks like a
+ * dedicated name column.
+ */
+function pickNameAndCategoryDescriptors(
+  headerCols: Array<{ colIndex: number; header: string }>
+): {
+  nameCol?: { colIndex: number; header: string };
+  categoryCol?: { colIndex: number; header: string };
+} {
+  const categoryCol = headerCols.find((h) => /^category$/i.test(h.header.trim()));
+
+  // Prefer an explicit "product"/"item"/"name"/"description" column.
+  let nameCol = headerCols.find((h) =>
+    /^(?:product|item|sku\s*name|name|description)$/i.test(h.header.trim())
+  );
+
+  // Otherwise, the first column that doesn't look like a code/id field.
+  if (!nameCol) {
+    nameCol = headerCols.find((h) => !/\b(?:code|id)\b/i.test(h.header));
+  }
+
+  // Last resort: the first header column overall.
+  if (!nameCol) {
+    nameCol = headerCols[0];
+  }
+
+  return { nameCol, categoryCol };
 }
 
 /**
@@ -1231,6 +1297,7 @@ export function parseMatrixSpreadsheet(
                   blockLabel: undefined,
                   blockIndex: blockIndexCounter++,
                   periods: [{ colIndex: c, periodInfo: singleCand.periodInfo }],
+                  headerCols: [],
                 },
               ];
               foundActuals = true;
@@ -1252,6 +1319,7 @@ export function parseMatrixSpreadsheet(
               blockLabel: isGenericTableHeader(col0) ? undefined : col0,
               blockIndex: blockIndexCounter++,
               periods: [singleCand],
+              headerCols: [],
             },
           ];
           continue;
@@ -1280,6 +1348,7 @@ export function parseMatrixSpreadsheet(
                 blockLabel: isGenericTableHeader(text) ? undefined : text,
                 blockIndex: blockIndexCounter++,
                 periods: [],
+                headerCols: [{ colIndex: c, header: text }],
               };
             } else if (!cur) {
               cur = {
@@ -1287,7 +1356,13 @@ export function parseMatrixSpreadsheet(
                 blockLabel: isGenericTableHeader(text) ? undefined : text,
                 blockIndex: blockIndexCounter++,
                 periods: [],
+                headerCols: [{ colIndex: c, header: text }],
               };
+            } else if (cur.periods.length === 0) {
+              // Additional leading text column before periods start, e.g.
+              // "SKU Code | Product | Category | Sub Category | Apr-24 | ...".
+              // Record it as a candidate descriptor column rather than dropping it.
+              cur.headerCols.push({ colIndex: c, header: text });
             }
           }
         }
@@ -1302,11 +1377,53 @@ export function parseMatrixSpreadsheet(
             blockLabel: isGenericTableHeader(col0) ? undefined : col0,
             blockIndex: blockIndexCounter++,
             periods: candidatePeriods,
+            headerCols: col0 ? [{ colIndex: 0, header: col0 }] : [],
           });
         }
 
-        // Refine labelCol for active block
+        // A row with >= 2 leading text columns is ambiguous: it could be a
+        // genuine wide entity table (every column populated per row, e.g.
+        // "SKU Code | Product | Category | Sub Category"), or it could be a
+        // single metric-label column plus a sparse annotation column (e.g.
+        // "Particulars | Note No." where Note No. is blank on most rows).
+        // Only the former should be treated as a descriptor table; the
+        // latter must fall back to the old single-best-column behaviour —
+        // otherwise the sparse column's near-empty values get treated as a
+        // row's "entity name" and the real metric label is discarded.
+        // Disambiguate by fill rate: keep headerCols as a descriptor set
+        // only if EVERY column is populated on most sampled rows.
         for (const blk of activeBlocks) {
+          if (blk.headerCols.length > 1) {
+            // Only columns that plausibly describe a per-row entity (not a
+            // generic placeholder, serial number, or free-text commentary
+            // column) count towards "this is a wide descriptor table".
+            const candidates = blk.headerCols.filter((h) => isDescriptorCandidate(h.header));
+
+            const sampleRows = rows.slice(r + 1, Math.min(rows.length, r + 25));
+            const sampleSize = Math.max(1, sampleRows.length);
+            const minFillRate =
+              candidates.length > 1
+                ? Math.min(
+                    ...candidates.map(
+                      (h) =>
+                        sampleRows.filter(
+                          (rowItem) => Array.isArray(rowItem) && String(rowItem[h.colIndex] ?? '').trim() !== ''
+                        ).length / sampleSize
+                    )
+                  )
+                : 0;
+
+            if (candidates.length > 1 && minFillRate >= 0.5) {
+              // Genuine wide descriptor table — narrow headerCols down to
+              // just the meaningful attribute columns and skip the
+              // single-column refine below.
+              blk.headerCols = candidates;
+              continue;
+            }
+            // Not a wide descriptor table — collapse back to the single
+            // best label column, exactly like the headerCols.length <= 1 case.
+            blk.headerCols = [blk.headerCols[0]!];
+          }
           if (blk.periods.length > 0 && blk.periods[0]!.colIndex > blk.labelCol) {
             let bestLabelCol = blk.labelCol;
             let maxTextCount = -1;
@@ -1360,8 +1477,43 @@ export function parseMatrixSpreadsheet(
       // Process metric rows for active horizontal blocks
       if (activeBlocks.length > 0) {
         for (const blk of activeBlocks) {
-          const rawLabel = String(row[blk.labelCol] || '').trim();
-          if (!rawLabel) continue;
+          const isWideDescriptorTable = blk.headerCols.length > 1;
+
+          let rawLabel: string;
+          let effectiveBlockLabel: string | undefined;
+          let effectiveParentBlockLabel: string | undefined = currentParentBlockLabel;
+          let attributes: Record<string, string> | undefined;
+
+          if (isWideDescriptorTable) {
+            // Wide entity/descriptor table (e.g. "SKU Code | Product | Category |
+            // Sub Category | Apr-24 | ..."): each row is one entity (a product),
+            // with descriptor VALUES in the leading columns — not metric names.
+            // The metric name comes from the enclosing section title instead
+            // (e.g. "NET Revenue"), and the entity's descriptor fields become
+            // blockLabel (name), parentBlockLabel (category), and attributes
+            // (everything else, e.g. SKU code, sub-category).
+            const { nameCol, categoryCol } = pickNameAndCategoryDescriptors(blk.headerCols);
+            const nameVal = nameCol ? String(row[nameCol.colIndex] || '').trim() : '';
+            if (!nameVal) continue;
+
+            rawLabel = currentParentBlockLabel || currentSectionLabel || nameVal;
+            effectiveBlockLabel = nameVal;
+            effectiveParentBlockLabel = categoryCol
+              ? String(row[categoryCol.colIndex] || '').trim() || undefined
+              : undefined;
+
+            const attrs: Record<string, string> = {};
+            for (const h of blk.headerCols) {
+              if (h === nameCol || h === categoryCol) continue;
+              const val = String(row[h.colIndex] || '').trim();
+              if (val) attrs[attributeKeyFromHeader(h.header)] = val;
+            }
+            if (Object.keys(attrs).length > 0) attributes = attrs;
+          } else {
+            rawLabel = String(row[blk.labelCol] || '').trim();
+            if (!rawLabel) continue;
+            effectiveBlockLabel = blk.blockLabel;
+          }
 
           const hasAnyData = blk.periods.some((p) => {
             const val = row[p.colIndex];
@@ -1369,7 +1521,13 @@ export function parseMatrixSpreadsheet(
           });
 
           if (!hasAnyData) {
-            currentSectionLabel = rawLabel;
+            // A wide descriptor table never has row text doubling as a
+            // sub-section label (that would be a different entity's name
+            // row simply having no data this period) — only genuine
+            // single-label-column blocks repurpose a dataless row that way.
+            if (!isWideDescriptorTable) {
+              currentSectionLabel = rawLabel;
+            }
             continue;
           }
 
@@ -1390,7 +1548,7 @@ export function parseMatrixSpreadsheet(
                 sheetName,
                 rawLabel,
                 normalizedLabel: normalizeLabel(rawLabel),
-                parentLabel: currentSectionLabel,
+                parentLabel: isWideDescriptorTable ? undefined : currentSectionLabel,
                 standardMetricKey: standardKey,
                 reportingPeriod: p.periodInfo.reportingPeriod,
                 periodDate: p.periodInfo.periodDate,
@@ -1406,10 +1564,11 @@ export function parseMatrixSpreadsheet(
                 status: 'quarantined',
                 validationNotes: `Formula error ${parsed.rawString}`,
                 granularity: p.periodInfo.granularity,
-                blockLabel: blk.blockLabel,
-                blockIndex: blk.blockLabel ? blk.blockIndex : undefined,
-                parentBlockLabel: currentParentBlockLabel,
+                blockLabel: effectiveBlockLabel,
+                blockIndex: effectiveBlockLabel ? blk.blockIndex : undefined,
+                parentBlockLabel: effectiveParentBlockLabel,
                 kind: metricKind.kind,
+                attributes,
               });
               horizontalExtractedCount++;
               continue;
@@ -1435,7 +1594,7 @@ export function parseMatrixSpreadsheet(
               sheetName,
               rawLabel,
               normalizedLabel: normalizeLabel(rawLabel),
-              parentLabel: currentSectionLabel,
+              parentLabel: isWideDescriptorTable ? undefined : currentSectionLabel,
               standardMetricKey: standardKey,
               reportingPeriod: p.periodInfo.reportingPeriod,
               periodDate: p.periodInfo.periodDate,
@@ -1450,10 +1609,11 @@ export function parseMatrixSpreadsheet(
               confidence: 1.0,
               status: 'valid',
               granularity: p.periodInfo.granularity,
-              blockLabel: blk.blockLabel,
-              blockIndex: blk.blockLabel ? blk.blockIndex : undefined,
-              parentBlockLabel: currentParentBlockLabel,
+              blockLabel: effectiveBlockLabel,
+              blockIndex: effectiveBlockLabel ? blk.blockIndex : undefined,
+              parentBlockLabel: effectiveParentBlockLabel,
               kind: metricKind.kind,
+              attributes,
             });
             horizontalExtractedCount++;
           }

@@ -251,6 +251,7 @@ export async function processDocument(
               blockIndex: m.blockIndex ?? null,
               parentBlockLabel: m.parentBlockLabel ?? null,
               kind: m.kind ?? null,
+              attributes: m.attributes ?? null,
             }));
             await tx.insert(misMetrics).values(batch);
           }

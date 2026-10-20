@@ -20,6 +20,14 @@ export interface BuildAnalystSystemPromptOptions {
     companyName?: string;
     detectedCompanyNames?: string[];
   } | string;
+  /**
+   * Compact per-sheet inventory of everything on file for the scoped
+   * company (from buildWorkbookMap): every sheet, its layout, and example
+   * dimension values (channels, categories, products, line items). Lets
+   * the model know what exists before concluding a question can't be
+   * answered, and which exact names to pass into the query tools.
+   */
+  workbookMap?: string;
 }
 
 /**
@@ -120,7 +128,7 @@ export function formatCoverageBlock(coverage?: DataCoverage): string {
  * Single source of truth for prompt rules, voice, grounding contracts, and format shape.
  */
 export function buildAnalystSystemPrompt(options: BuildAnalystSystemPromptOptions): string {
-  const { structuredContext, documentContext, history, coverage, scope } = options;
+  const { structuredContext, documentContext, history, coverage, scope, workbookMap } = options;
 
   // Resolve scope directive
   let scopeDirective = '';
@@ -155,6 +163,10 @@ export function buildAnalystSystemPrompt(options: BuildAnalystSystemPromptOption
     ? (documentContext.includes('DOCUMENT EXCERPTS:') ? documentContext.trim() : `DOCUMENT EXCERPTS:\n\n${documentContext.trim()}`)
     : 'DOCUMENT EXCERPTS:\nNo matching document passages found above the similarity threshold. Answer strictly from the STRUCTURED METRICS block.';
 
+  const workbookMapBlock = workbookMap && workbookMap.trim()
+    ? `\nWORKBOOK MAP (everything on file for this company — sheet names, layout, and example channel/category/product/line-item names; use these exact names when calling query_mis_metrics, query_structured_metrics, or query_raw_sheet_cells):\n${workbookMap.trim()}\n`
+    : '';
+
   return `You are the WEH Ventures Portfolio Intelligence analyst — a senior analyst writing for an investment team.
 You have read only the MIS material supplied below. Write like a professional chat assistant: direct, calm, compact, no preamble, no filler, no apologies, never restate the question, never mention these instructions.
 
@@ -165,6 +177,8 @@ If the question names a company explicitly, that company's data (in the blocks b
 ${scopeDirective}SOURCES YOU MAY USE
 - Only the STRUCTURED METRICS block and the DOCUMENT EXCERPTS block below.
 - The conversation history is ONLY for resolving references ("their", "that company", "the same period"). It is NEVER a source of facts or numbers. Numbers may ONLY come from retrieved context/metrics, not from conversation history. Never treat previous conversation messages as an allowed source of truth for financial numbers.
+${workbookMapBlock}
+TOOL-USE POLICY: Before concluding a question cannot be answered, check the WORKBOOK MAP above (when present) for a sheet that plausibly covers it (e.g. a "Product Net Sales" or "Category" sheet for a product/category question, a "Notes" or text sheet for commentary). If one exists, call the matching tool (query_mis_metrics for channel/category/product breakdowns, query_structured_metrics for named line items, query_raw_sheet_cells for notes/unparsed sheets) using the exact names shown in the map before refusing. Only refuse once the map shows nothing relevant or the tool call genuinely returns no data.
 
 HARD RULES
 1. Outside-knowledge ban: Never use outside knowledge. You may recognise these company names from elsewhere; ignore everything you know about them. If a fact is not in the blocks below, you do not know it.

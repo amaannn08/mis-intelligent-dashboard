@@ -2,6 +2,7 @@ import {
   date,
   index,
   integer,
+  jsonb,
   numeric,
   pgTable,
   text,
@@ -49,6 +50,7 @@ export const misMetrics = pgTable(
     blockIndex: integer('block_index'), // Sequential index of block within sheet
     parentBlockLabel: text('parent_block_label'), // e.g. 'Blinkit'
     kind: text('kind'), // 'currency' | 'count' | 'percent' | 'ratio'
+    attributes: jsonb('attributes'), // e.g. { sku_code: 'CO-9340', sub_category: 'Inhouse' } for wide entity tables
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

@@ -111,6 +111,12 @@ export interface ParsedMatrixMetric {
   parentBlockLabel?: string;
   kind?: 'count' | 'percent' | 'currency' | 'ratio';
   periodProvenance?: 'source' | 'inferred';
+  /**
+   * Extra per-row descriptor fields from a wide entity table, e.g.
+   * { sku_code: 'CO-9340', sub_category: 'Inhouse' } for a product sheet
+   * laid out as SKU Code | Product | Category | Sub Category | <months...>.
+   */
+  attributes?: Record<string, string>;
 }
 
 export interface MatrixParseResult {

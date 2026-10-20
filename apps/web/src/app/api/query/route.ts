@@ -16,6 +16,7 @@ import {
   queryRawSheetCells,
   discoverRawSheets,
   resolveCompanyByName,
+  buildWorkbookMap,
   type MetricContextRow,
   type RetrievedChunkRow,
 } from '@mis/core';
@@ -328,6 +329,16 @@ export async function POST(request: NextRequest) {
       question
     );
 
+  // queryMisMetrics auto-selects a sheet literally named "Category" when no
+  // sheetName is given, which is wrong for a product/SKU-level question (e.g.
+  // "top selling product") — that data lives in a separate "Product ..."
+  // sheet. Infer that case and target it explicitly instead of always
+  // falling back to category ranking. (Not done for "channel" — a bare
+  // "%channel%" ILIKE would also match "Category X Channel", conflating two
+  // different dimensions; the model's own query_mis_metrics tool call
+  // already handles channel questions well via parentBlock filtering.)
+  const breakdownSheetHint = /\b(product|sku|item)\b/i.test(question) ? 'product' : undefined;
+
   // When a product/category/channel breakdown is found, the company-level
   // revenue trend chart is the wrong visual for the question (it answers
   // "how much revenue" instead of "which product/category") and juxtaposing
@@ -343,6 +354,7 @@ export async function POST(request: NextRequest) {
         companyId: breakdownCompany.companyId,
         companyName: breakdownCompany.companyName,
         metric: targetMetric,
+        sheetName: breakdownSheetHint,
         limit: 25,
       });
 
@@ -351,13 +363,16 @@ export async function POST(request: NextRequest) {
         const topCat = misRes.rankedCategories[0];
         let breakdownSection = `\n### Granular Category / Segment Breakdown from mis_metrics (${misRes.companyName}):\n`;
         breakdownSection += `Source: Sheet '${misRes.authoritativeSheet || 'Category'}' in '${misRes.authoritativeDocument || ''}'. Provenance: ${topCat?.scaleProvenance}.\n`;
-        breakdownSection += `| Category | Latest Month (${topCat?.latestPeriod}) | Cumulative (${topCat?.minPeriod} to ${topCat?.maxPeriod}) | Normalized Base Amount (Cumulative) |\n`;
-        breakdownSection += `| :--- | :--- | :--- | :--- |\n`;
+        breakdownSection += `| Category/Product | Parent (e.g. category) | Attributes (e.g. SKU) | Latest Month (${topCat?.latestPeriod}) | Cumulative (${topCat?.minPeriod} to ${topCat?.maxPeriod}) | Normalized Base Amount (Cumulative) |\n`;
+        breakdownSection += `| :--- | :--- | :--- | :--- | :--- | :--- |\n`;
         for (const cat of misRes.rankedCategories) {
           const normStr = cat.source_currency === 'INR' && cat.scale !== 'units'
             ? `₹${(cat.normalized_amount_cumulative_inr / 10_000_000).toFixed(2)} Cr (₹${cat.normalized_amount_cumulative_inr.toLocaleString('en-IN')})`
             : `${cat.source_currency} ${cat.normalized_amount_cumulative_inr.toLocaleString()}`;
-          breakdownSection += `| ${cat.blockLabel} | ${cat.source_value_latest_formatted} | ${cat.source_value_cumulative_formatted} | ${normStr} |\n`;
+          const attrsStr = cat.attributes
+            ? Object.entries(cat.attributes).map(([k, v]) => `${k}: ${v}`).join(', ')
+            : '';
+          breakdownSection += `| ${cat.blockLabel} | ${cat.parentBlockLabel || ''} | ${attrsStr} | ${cat.source_value_latest_formatted} | ${cat.source_value_cumulative_formatted} | ${normStr} |\n`;
         }
         breakdownSection += `\n*NOTE ON FIGURES: For segment breakdowns, cite the source amounts in ${topCat?.source_scale} (e.g. "${topCat?.source_value_latest_formatted}" in ${topCat?.latestPeriod}, "${topCat?.source_value_cumulative_formatted}" cumulative) alongside any normalized Crore figures. DO NOT multiply by scale multiplier again!*\n`;
         structuredContext = structuredContext
@@ -444,6 +459,19 @@ export async function POST(request: NextRequest) {
     scopeCompanyName = matched?.name;
   }
 
+  // Workbook map: a per-sheet inventory of everything on file for the scoped
+  // company (sheet names, layout, example channel/category/product/line-item
+  // names). Only built for a single-company scope, not portfolio-wide
+  // comparisons, to keep prompt size bounded.
+  let workbookMap = '';
+  if (targetCompanyId) {
+    try {
+      workbookMap = await buildWorkbookMap({ companyId: targetCompanyId });
+    } catch (err) {
+      console.error('Failed to build workbook map:', err);
+    }
+  }
+
   const { systemPrompt, allCitations } = buildHybridRAGPrompt({
     structuredContext,
     structuredRows,
@@ -453,6 +481,7 @@ export async function POST(request: NextRequest) {
     scopeCompanyName,
     totalPortfolioCompanies: knownCompanies.length || 28,
     portfolioCompaniesWithData,
+    workbookMap,
   });
 
   const deepseekApiKey = process.env.DEEPSEEK_API_KEY;
@@ -648,29 +677,36 @@ export async function POST(request: NextRequest) {
     }),
     query_mis_metrics: tool({
       description:
-        'Query granular MIS metric breakdowns and rankings from the mis_metrics database table (e.g. category-level, channel-level, or product line data). Use this whenever the user asks about categories, channels, best-selling or lowest-selling segments, SKU/category revenue, volumes, or breakdowns for a company.',
+        'Query granular MIS metric breakdowns and rankings from the mis_metrics database table (e.g. category-level, channel-level, SKU/product-level, or any other wide breakdown sheet). Use this whenever the user asks about categories, channels, best-selling or lowest-selling segments/products/SKUs, revenue, volumes, or breakdowns for a company. Without sheetName, this ranks by the company\'s dedicated "Category" sheet — WRONG for a product/SKU question. Check the WORKBOOK MAP for the exact sheet name (e.g. "Product Net Sales") and pass it as sheetName whenever the question is about products/SKUs rather than categories.',
       inputSchema: z.object({
         companyName: z.string().describe('Company name e.g. "Masterchow"'),
         metric: z
           .string()
           .default('net_revenue')
           .describe('Metric name: e.g. "net_revenue", "gross_revenue", "qty", or "revenue"'),
+        sheetName: z
+          .string()
+          .optional()
+          .describe(
+            'Exact or partial sheet name to target, from the WORKBOOK MAP (e.g. "Product Net Sales"). Required to rank by product/SKU rather than category — otherwise this defaults to the company\'s "Category" sheet.'
+          ),
         parentBlock: z
           .string()
           .optional()
-          .describe('Parent block filter e.g. "Blinkit", "Zepto", or channel name'),
+          .describe('Parent block filter e.g. "Blinkit", "Zepto", a channel name, or a category name (for product-sheet queries)'),
         block: z
           .string()
           .optional()
-          .describe('Block / category filter e.g. "Condiments", "Stick Noodles"'),
+          .describe('Block filter e.g. "Condiments", "Stick Noodles", or an exact product name'),
         period: z.string().optional().describe('Specific period filter YYYY-MM e.g. "2024-04"'),
       }),
-      execute: async ({ companyName, metric, parentBlock, block, period }) => {
+      execute: async ({ companyName, metric, sheetName, parentBlock, block, period }) => {
         const resolved = resolveToolCompany(companyName, targetCompanyId);
         return await queryMisMetrics({
           companyName: resolved.companyName,
           companyId: resolved.companyId,
           metric,
+          sheetName,
           parentBlockLabel: parentBlock,
           blockLabel: block,
           period,
